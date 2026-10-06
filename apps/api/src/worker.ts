@@ -7,6 +7,8 @@ import { SettlementService } from '@abc/settlement';
 import { SupportService } from '@abc/support';
 import { VehicleService } from '@abc/vehicles';
 import { buildCommsRuntime } from './comms/runtime';
+import { CatalogueReader } from './lots/catalogue-reader';
+import { SavedSearchAlerts } from './watch/saved-search-alerts';
 
 /**
  * The worker: closes lots whose (possibly extended) end time has passed, issues
@@ -14,7 +16,7 @@ import { buildCommsRuntime } from './comms/runtime';
  * and overdue-title alerts, and dispatches messages (docs/16). It also keeps collection
  * slots generated, queues slot reminders and flags missed ticket and claim deadlines
  * (deliverables 15 and 17), and lapses override requests and retires superseded rule
- * sets (deliverable 18). Each step is idempotent, so running two workers or restarting one is safe.
+ * sets (deliverable 18), and tells people when a saved search finds new lots. Each step is idempotent, so running two workers or restarting one is safe.
  * Usage: pnpm --filter @abc/api worker [--once]
  */
 loadDotEnv();
@@ -28,6 +30,7 @@ if (!gatePassSecret) throw new Error('GATE_PASS_SECRET is required in production
 const settlement = new SettlementService(db, rulebook, { gatePassSecret });
 const vehicles = new VehicleService(db, rulebook);
 const comms = buildCommsRuntime(db, rulebook);
+const savedSearches = new SavedSearchAlerts(db, new CatalogueReader(db, rulebook), process.env.PUBLIC_WEB_URL ?? 'http://localhost:3000');
 const intervalMs = Number(process.env.WORKER_INTERVAL_MS ?? 5_000);
 
 export async function tick(now = new Date()): Promise<void> {
@@ -50,6 +53,8 @@ export async function tick(now = new Date()): Promise<void> {
   if (retired.length) console.log(`retired superseded rule set(s): ${retired.join(', ')}`);
   await vehicles.alertOverdueTitleSteps(now);
   await comms.endingSoon.queue(now);
+  const matched = await savedSearches.run();
+  if (matched) console.log(`saved searches: ${matched} with new lots`);
   await comms.intake.resumeSubmissions(now);
   await logisticsAndSupportTick(now);
   // Last, so messages raised by every step above go out in the same tick.

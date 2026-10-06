@@ -1122,8 +1122,28 @@ CREATE TABLE catalogue.saved_search (
   name          text NOT NULL,
   query         jsonb NOT NULL,                  -- category, keywords, branch, price band, currency
   alerts_on     boolean NOT NULL DEFAULT true,
-  created_at    timestamptz NOT NULL DEFAULT clock_timestamp()
+  created_at    timestamptz NOT NULL DEFAULT clock_timestamp(),
+  CONSTRAINT saved_search_name_unique UNIQUE (account_id, name)    -- migration 0005
 );
+CREATE INDEX saved_search_account_idx ON catalogue.saved_search (account_id);
+
+-- The lots each saved search has already told its owner about, so an alert only names new lots (migration 0005).
+CREATE TABLE catalogue.saved_search_hit (
+  saved_search_id uuid NOT NULL REFERENCES catalogue.saved_search (id) ON DELETE CASCADE,
+  lot_id          uuid NOT NULL REFERENCES catalogue.lot (id),
+  seen_at         timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (saved_search_id, lot_id)
+);
+
+-- A lot someone saved for later (migration 0005). Personal and reversible, so not audited;
+-- the ending-soon alert goes to watchers as well as bidders.
+CREATE TABLE catalogue.watch (
+  account_id uuid NOT NULL REFERENCES identity.account (id),
+  lot_id     uuid NOT NULL REFERENCES catalogue.lot (id),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (account_id, lot_id)
+);
+CREATE INDEX watch_lot_idx ON catalogue.watch (lot_id);
 
 -- -----------------------------------------------------------------------------
 -- auction: auctions and lots within them (bidding state lives on auction_lot)
@@ -2345,8 +2365,8 @@ CREATE TABLE comms.preference (
   enabled    boolean NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
   PRIMARY KEY (account_id, category, channel),
-  CONSTRAINT preference_category CHECK (category IN ('outbid', 'ending_soon', 'auction_results', 'payments', 'collection',
-                                                     'selling', 'account', 'staff_tasks', 'marketing'))
+  CONSTRAINT preference_category CHECK (category IN ('outbid', 'ending_soon', 'saved_searches', 'auction_results', 'payments',
+                                                     'collection', 'selling', 'account', 'staff_tasks', 'marketing'))  -- saved_searches: migration 0005
 );
 
 -- Transactional categories always keep at least one channel (docs/16 §6).

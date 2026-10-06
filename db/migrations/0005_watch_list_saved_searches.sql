@@ -1,52 +1,36 @@
--- =============================================================================
--- Reference data. Loaded after schema.sql. Safe to re-run.
--- Provenance per row is noted; see docs/00-assumptions-register.md for tags.
--- =============================================================================
+-- Watch list and saved searches with alerts (catalogue, docs/05 §7; messages, docs/16 §4).
+-- Folded into db/schema.sql and db/seed.sql as well; this file brings existing
+-- databases up to date. No BEGIN/COMMIT: the migration runner wraps it in one transaction.
 
-BEGIN;
+-- A lot someone saved for later. Personal and reversible, so not audited; the
+-- ending-soon alert goes to watchers as well as bidders.
+CREATE TABLE catalogue.watch (
+  account_id uuid NOT NULL REFERENCES identity.account (id),
+  lot_id     uuid NOT NULL REFERENCES catalogue.lot (id),
+  created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (account_id, lot_id)
+);
+CREATE INDEX watch_lot_idx ON catalogue.watch (lot_id);
 
--- Branches (CONFIRMED: Harare and Bulawayo). Hours CONFIRMED: 9am–3pm weekdays, 9am–12pm Saturdays.
-INSERT INTO core.branch (code, name, city, opening_hours) VALUES
-  ('HRE', 'ABC Auctions Harare',   'Harare',   '{"mon_fri": "09:00-15:00", "sat": "09:00-12:00"}'),
-  ('BYO', 'ABC Auctions Bulawayo', 'Bulawayo', '{"mon_fri": "09:00-15:00", "sat": "09:00-12:00"}')
-ON CONFLICT (code) DO NOTHING;
+-- Saved searches (the table predates this migration): one name per person, and the lots
+-- each search has already told its owner about, so an alert only ever names new lots.
+CREATE INDEX saved_search_account_idx ON catalogue.saved_search (account_id);
+ALTER TABLE catalogue.saved_search ADD CONSTRAINT saved_search_name_unique UNIQUE (account_id, name);
+CREATE TABLE catalogue.saved_search_hit (
+  saved_search_id uuid NOT NULL REFERENCES catalogue.saved_search (id) ON DELETE CASCADE,
+  lot_id          uuid NOT NULL REFERENCES catalogue.lot (id),
+  seen_at         timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (saved_search_id, lot_id)
+);
 
--- Item state vocabulary (D1: build brief's list; ABC to confirm it matches the help desk).
-INSERT INTO catalogue.item_state_term (code, label, description, sort) VALUES
-  ('new',          'New',            'Unused, in original packaging.', 1),
-  ('new_open_box', 'New – Open Box', 'Unused, but the packaging has been opened.', 2),
-  ('used',         'Used',           'Previously used.', 3),
-  ('renewed',      'Renewed',        'Previously used and restored to working order.', 4)
-ON CONFLICT (code) DO NOTHING;
+-- A preference category for saved-search alerts (default: app notification and email,
+-- rule comms.preference_defaults).
+ALTER TABLE comms.preference DROP CONSTRAINT preference_category;
+ALTER TABLE comms.preference ADD CONSTRAINT preference_category CHECK (category IN ('outbid', 'ending_soon', 'saved_searches',
+  'auction_results', 'payments', 'collection', 'selling', 'account', 'staff_tasks', 'marketing'));
 
--- Condition vocabulary (D1).
-INSERT INTO catalogue.condition_term (code, label, description, sort) VALUES
-  ('as_is',          'As Is',          'Sold in its current state with no claim about condition or function.', 1),
-  ('working',        'Working',        'Tested and working at intake.', 2),
-  ('untested',       'Untested',       'Not tested. Function unknown.', 3),
-  ('partly_working', 'Partly Working', 'Some functions work; faults are described in the notes.', 4),
-  ('damaged',        'Damaged',        'Visible damage, described and photographed.', 5),
-  ('broken',         'Broken',         'Does not work because of physical damage.', 6),
-  ('incomplete',     'Incomplete',     'Parts or accessories are missing, listed in the notes.', 7),
-  ('sealed_packing', 'Sealed Packing', 'In unopened sealed packing; contents not inspected.', 8),
-  ('not_working',    'Not Working',    'Tested and does not work.', 9)
-ON CONFLICT (code) DO NOTHING;
+-- The two new templates (ending_soon_saved, saved_search_match); existing rows are left as they are.
 
--- Example categories. Deposit-required categories (vehicles, IT, catering, special) are
--- CONFIRMED; the deposit rule itself lives in the rulebook. Tax classes are placeholders
--- until finance answers Q9.
-INSERT INTO catalogue.category (code, parent_code, name, is_vehicle, tax_class) VALUES
-  ('vehicles',          NULL,       'Vehicles',                  true,  'vehicle_standard'),
-  ('vehicles_used_zw',  'vehicles', 'Used vehicles (ZW-registered)', true, 'vehicle_used_zw'),
-  ('it',                NULL,       'IT and electronics',        false, 'goods_standard'),
-  ('catering',          NULL,       'Catering equipment',        false, 'goods_standard'),
-  ('furniture',         NULL,       'Furniture',                 false, 'goods_standard'),
-  ('general',           NULL,       'General goods',             false, 'goods_standard'),
-  ('special',           NULL,       'Special auctions',          false, 'goods_standard')
-ON CONFLICT (code) DO NOTHING;
-
--- Message templates (deliverable 16, docs/16 §3): plain, short copy per channel, approved.
--- Generated from packages/comms/src/library.ts; a test checks this block matches it.
 -- BEGIN comms template library (generated: pnpm --filter @abc/comms templates:sql)
 INSERT INTO comms.template (key, version, channel, locale, category, subject, body, provider_template_name, status) VALUES
   ('outbid', 1, 'whatsapp', 'en-ZW', 'alert', NULL, 'ABC Auctions: You were outbid on {{lot}}. It is now {{price}}. Bid again: {{link}}', 'abc_outbid_v1', 'approved'),
@@ -170,5 +154,3 @@ INSERT INTO comms.template (key, version, channel, locale, category, subject, bo
   ('chat_reply', 1, 'whatsapp', 'en-ZW', 'transactional', NULL, '{{text}}', NULL, 'approved')
 ON CONFLICT (key, version, channel, locale) DO NOTHING;
 -- END comms template library
-
-COMMIT;

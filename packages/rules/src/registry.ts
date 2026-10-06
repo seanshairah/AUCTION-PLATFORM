@@ -215,7 +215,7 @@ export type CommsPolicy = (typeof COMMS_POLICIES)[number];
 
 /** What people can switch on or off per channel (comms.preference.category, docs/16 §6). */
 export const PREFERENCE_CATEGORIES = [
-  'outbid', 'ending_soon', 'auction_results', 'payments', 'collection', 'selling', 'account', 'staff_tasks', 'marketing',
+  'outbid', 'ending_soon', 'saved_searches', 'auction_results', 'payments', 'collection', 'selling', 'account', 'staff_tasks', 'marketing',
 ] as const;
 export type PreferenceCategory = (typeof PREFERENCE_CATEGORIES)[number];
 /** Categories that cannot be switched off completely: at least one channel always stays on. */
@@ -226,6 +226,7 @@ export const PREFERENCE_CHANNELS = ['whatsapp', 'push', 'sms', 'email'] as const
 export const PREFERENCE_LABELS: Record<PreferenceCategory, string> = {
   outbid: 'outbid alerts',
   ending_soon: 'ending-soon alerts',
+  saved_searches: 'saved-search alerts',
   auction_results: 'auction results',
   payments: 'invoices and payments',
   collection: 'collection',

@@ -2,7 +2,11 @@ import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { INestApplication } from '@nestjs/common';
 import { createTestDatabase, DB_TESTS_ENABLED, type TestDatabase } from '@abc/db';
+import { EndingSoonAlerts } from '@abc/comms';
+import { RulebookStore } from '@abc/db';
 import { createApp } from './app';
+import { CatalogueReader } from './lots/catalogue-reader';
+import { SavedSearchAlerts } from './watch/saved-search-alerts';
 import { seedDemo, type DemoSeedResult } from './demo/seed';
 import { mintSession, verifySession } from './session';
 import { configFromEnv } from './tokens';
@@ -140,6 +144,58 @@ describe.skipIf(!DB_TESTS_ENABLED)('API against PostgreSQL with the demo data', 
     expect((await http().get('/staff/tickets').set('Cookie', support).expect(200)).body).toEqual([expect.objectContaining({ channel: 'whatsapp', status: 'open' })]);
     const pending = (await http().get('/staff/overrides?status=pending').set('Cookie', ops).expect(200)).body;
     expect(pending).toEqual([expect.objectContaining({ kind: 'limit_change', requiresSecondApproval: true, amount: expect.objectContaining({ text: 'US$25,000.00' }) })]);
+  });
+
+  it('watch list: save a lot for later, see it flagged, and hear when it is about to close', async () => {
+    const http = () => request(app.getHttpServer());
+    const farai = await signIn('farai');
+    const ref = (await http().get('/lots?q=Hilux').expect(200)).body.lots[0].ref as string;
+    await http().put(`/me/watch/${ref}`).set('Cookie', farai).expect(200, { watching: true });
+    await http().put(`/me/watch/${ref}`).set('Cookie', farai).expect(200); // twice is still once
+    await http().put('/me/watch/NOPE-1').set('Cookie', farai).expect(404);
+    const list = (await http().get('/me/watch').set('Cookie', farai).expect(200)).body;
+    expect(list).toEqual([expect.objectContaining({ ref, result: 'pending', viewer: { leading: false, watching: true } })]);
+    const docket = (await http().get('/lots?q=Hilux').set('Cookie', farai).expect(200)).body.lots[0];
+    expect(docket.viewer).toEqual({ leading: false, watching: true });
+
+    // Farai has not bid on the Hilux, so the ending-soon alert is the watch-list one.
+    const endsAt = new Date(list[0].endsAt);
+    await new EndingSoonAlerts(t.db, new RulebookStore(t.db)).queue(new Date(endsAt.getTime() - 10 * 60_000));
+    const events = await t.db.query<{ payload: { accountId: string; watching: boolean } }>(
+      `SELECT payload FROM core.outbox WHERE topic = 'lot.ending_soon' AND payload->>'accountId' = $1`, [seed.accounts.farai],
+    );
+    expect(events.rows.map((r) => r.payload.watching)).toContain(true);
+
+    await http().delete(`/me/watch/${ref}`).set('Cookie', farai).expect(200, { watching: false });
+    expect((await http().get('/me/watch').set('Cookie', farai).expect(200)).body).toEqual([]);
+    await http().get('/me/watch').expect(401);
+  });
+
+  it('saved searches: today’s matches are not news; later matches raise one alert, once', async () => {
+    const http = () => request(app.getHttpServer());
+    const rudo = await signIn('rudo');
+    await http().put('/me/saved-searches').set('Cookie', rudo).send({ name: 'Anything', query: {} }).expect(400);
+    await http().put('/me/saved-searches').set('Cookie', rudo).send({ name: 'Bad', query: { colour: 'red' } }).expect(400);
+    const saved = (await http().put('/me/saved-searches').set('Cookie', rudo).send({ name: 'Toyotas', query: { make: 'Toyota' } }).expect(200)).body;
+    expect(saved).toMatchObject({ created: true, alerts: true, matches: expect.any(Number) });
+    expect(saved.matches).toBeGreaterThan(0);
+    const alerts = new SavedSearchAlerts(t.db, new CatalogueReader(t.db, new RulebookStore(t.db)), 'https://abc.example');
+    expect(await alerts.run()).toBe(0); // everything it matches was already on the page
+
+    // As if those lots were listed after the search was saved:
+    await t.db.query('DELETE FROM catalogue.saved_search_hit WHERE saved_search_id = $1', [saved.id]);
+    expect(await alerts.run()).toBe(1);
+    expect(await alerts.run()).toBe(0);
+    const ev = await t.db.query<{ payload: { count: number; search: string; link: string } }>(`SELECT payload FROM core.outbox WHERE topic = 'saved_search.matched' AND aggregate_id = $1`, [saved.id]);
+    expect(ev.rows).toEqual([{ payload: expect.objectContaining({ count: saved.matches, search: 'Toyotas', link: 'https://abc.example/auctions?make=Toyota' }) }]);
+
+    const mine = (await http().get('/me/saved-searches').set('Cookie', rudo).expect(200)).body;
+    expect(mine).toEqual([expect.objectContaining({ name: 'Toyotas', alerts: true, matches: saved.matches, query: { make: 'Toyota' } })]);
+    await http().patch(`/me/saved-searches/${saved.id}`).set('Cookie', rudo).send({ alerts: false }).expect(200);
+    const tendai = await signIn('tendai'); // a request built before an await inside it never starts (supertest)
+    await http().patch(`/me/saved-searches/${saved.id}`).set('Cookie', tendai).send({ alerts: true }).expect(404);
+    await http().delete(`/me/saved-searches/${saved.id}`).set('Cookie', rudo).expect(200);
+    expect((await http().get('/me/saved-searches').set('Cookie', rudo).expect(200)).body).toEqual([]);
   });
 
   it('serves the public rulebook from the published rule set', async () => {

@@ -69,6 +69,20 @@ export const TEMPLATE_LIBRARY: readonly TemplateDefinition[] = [
     example: { lot: LOT, minutes: '60', price: 'US$24,500.00', link: LINK },
   },
   {
+    key: 'ending_soon_saved', version: 1, category: 'alert', preference: 'ending_soon', policy: 'ending_soon', channels: ALL,
+    text: 'ABC Auctions: {{lot}}, on your watch list, closes in {{minutes}} minutes at {{price}}. {{link}}',
+    subject: '{{lot}} on your watch list closes soon',
+    email: '{{lot}}, which you saved to your watch list, closes in {{minutes}} minutes. The price is {{price}}.\n\nTo bid, open {{link}}',
+    example: { lot: LOT, minutes: '60', price: 'US$24,500.00', link: LINK },
+  },
+  {
+    key: 'saved_search_match', version: 1, category: 'alert', preference: 'saved_searches', policy: 'ending_soon', channels: ALL,
+    text: 'ABC Auctions: {{matches}} for "{{search}}": {{lot}} from {{price}}. {{link}}',
+    subject: '{{matches}} for "{{search}}"',
+    email: '{{matches}} for your saved search "{{search}}", starting with {{lot}} from {{price}}.\n\nSee them all: {{link}}\n\nTo stop these alerts, switch them off on the search in your account.',
+    example: { matches: '2 new lots', search: 'Toyota pickups under US$30k', lot: LOT, price: 'US$18,000.00', link: `${WEB}/auctions?make=Toyota&bodyStyle=pickup` },
+  },
+  {
     key: 'won', version: 1, category: 'transactional', preference: 'auction_results', policy: 'won', channels: ALL,
     text: 'ABC Auctions: You won {{lot}} for {{price}}. Your invoice follows when the auction closes. {{link}}',
     subject: 'You won {{lot}}',

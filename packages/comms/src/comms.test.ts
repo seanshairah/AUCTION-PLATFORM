@@ -114,13 +114,14 @@ describe('the template library', () => {
     }
   });
 
-  it('db/seed.sql holds exactly the generated library (and migration 0002 the same rows)', () => {
+  it('db/seed.sql holds exactly the generated library, and so does the latest migration that adds templates', () => {
     const block = (file: string) => {
       const s = readFileSync(`${ROOT}${file}`, 'utf8');
       return s.slice(s.indexOf(TEMPLATE_SQL_BEGIN), s.indexOf(TEMPLATE_SQL_END) + TEMPLATE_SQL_END.length);
     };
     expect(block('db/seed.sql')).toBe(templatesSql());
-    expect(block('db/migrations/0002_comms_identity.sql')).toBe(templatesSql());
+    // Earlier migrations (0002) keep the rows they shipped with; inserts never overwrite (ON CONFLICT DO NOTHING).
+    expect(block('db/migrations/0005_watch_list_saved_searches.sql')).toBe(templatesSql());
   });
 
   it('names WhatsApp templates per version; a chat reply is a session message', () => {

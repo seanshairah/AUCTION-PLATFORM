@@ -40,7 +40,7 @@ export interface LotCard {
   inspectionSummary: string | null;
   photoCount: number;
   cover: string | null;
-  viewer: { leading: boolean } | null;
+  viewer: { leading: boolean; watching: boolean } | null;
 }
 
 export interface InspectionItem {
@@ -83,7 +83,7 @@ export interface LotDetail extends Omit<LotCard, 'viewer'> {
   } | null;
   towingPartners: Array<{ name: string; phone: string; notes: string | null }>;
   jsonLd: Record<string, unknown>;
-  viewer: { leading: boolean; yourMax: Money | null; registration: string | null } | null;
+  viewer: { leading: boolean; watching: boolean; yourMax: Money | null; registration: string | null } | null;
 }
 
 export type Facets = Record<string, Array<{ value: string; count: number }>>;

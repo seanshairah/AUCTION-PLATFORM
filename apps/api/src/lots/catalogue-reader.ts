@@ -176,7 +176,7 @@ export interface LotCard {
   photoCount: number;
   /** The first photo (the standard set starts with the front), or null when there is none. */
   cover: string | null;
-  viewer: { leading: boolean } | null;
+  viewer: { leading: boolean; watching: boolean } | null;
 }
 
 export class CatalogueReader {
@@ -210,7 +210,14 @@ export class CatalogueReader {
     }
   }
 
-  private async card(row: LotRow, taxRates: readonly TaxRateRecord[], viewerId: string | null, at: Date): Promise<LotCard> {
+  /** Lot ids on this person's watch list (catalogue.watch). */
+  private async watched(viewerId: string | null): Promise<Set<string>> {
+    if (!viewerId) return new Set();
+    const r = await this.db.query<{ lot_id: string }>('SELECT lot_id FROM catalogue.watch WHERE account_id = $1', [viewerId]);
+    return new Set(r.rows.map((x) => x.lot_id));
+  }
+
+  private async card(row: LotRow, taxRates: readonly TaxRateRecord[], viewerId: string | null, at: Date, watched: ReadonlySet<string> = new Set()): Promise<LotCard> {
     const pricing = await this.pricing(row);
     let nextMinimum = row.starting_bid_minor;
     let allIn: Quote | null = null;
@@ -258,7 +265,7 @@ export class CatalogueReader {
       inspectionSummary: row.inspection_summary,
       photoCount: Number(row.photo_count),
       cover: row.cover_key ? mediaUrl(row.cover_key) : null,
-      viewer: viewerId ? { leading: row.leading_account_id === viewerId } : null,
+      viewer: viewerId ? { leading: row.leading_account_id === viewerId, watching: watched.has(row.lot_id) } : null,
     };
   }
 
@@ -286,10 +293,25 @@ export class CatalogueReader {
     if (filters.endingWithinHours) where.push(`al.current_end_at <= ${p(new Date(at.getTime() + filters.endingWithinHours * 3_600_000))}`);
     const order = SORTS[filters.sort ?? 'ending_soon'];
     const r = await this.db.query<LotRow>(`${LOT_SELECT} WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 200`, params);
-    const taxRates = await this.rulebook.taxRates();
+    const [taxRates, watched] = await Promise.all([this.rulebook.taxRates(), this.watched(viewerId)]);
     const lots = [];
-    for (const row of r.rows) lots.push(await this.card(row, taxRates, viewerId, at));
+    for (const row of r.rows) lots.push(await this.card(row, taxRates, viewerId, at, watched));
     return { lots, total: lots.length };
+  }
+
+  /** The lots someone saved, live ones first (soonest closing), then closed ones (most recent first). */
+  async watchedLots(viewerId: string, at = new Date()): Promise<Array<LotCard & { result: string }>> {
+    const r = await this.db.query<LotRow>(
+      `${LOT_SELECT}
+        WHERE al.id = l.current_auction_lot_id AND l.id IN (SELECT lot_id FROM catalogue.watch WHERE account_id = $1)
+        ORDER BY (al.result = 'pending') DESC, CASE WHEN al.result = 'pending' THEN al.current_end_at END ASC, al.current_end_at DESC
+        LIMIT 200`,
+      [viewerId],
+    );
+    const [taxRates, watched] = await Promise.all([this.rulebook.taxRates(), this.watched(viewerId)]);
+    const out = [];
+    for (const row of r.rows) out.push({ ...(await this.card(row, taxRates, viewerId, at, watched)), result: row.result });
+    return out;
   }
 
   /** Values to filter by, with how many live lots have each. */
@@ -324,8 +346,8 @@ export class CatalogueReader {
   async lotDetail(idOrRef: string, viewerId: string | null, at = new Date()) {
     const row = await this.lotRow(idOrRef);
     if (!row) return null;
-    const taxRates = await this.rulebook.taxRates();
-    const card = await this.card(row, taxRates, viewerId, at);
+    const [taxRates, watched] = await Promise.all([this.rulebook.taxRates(), this.watched(viewerId)]);
+    const card = await this.card(row, taxRates, viewerId, at, watched);
     const pricing = await this.pricing(row);
 
     const [bids, inspection, media, partners, registration] = await Promise.all([
@@ -442,7 +464,7 @@ export class CatalogueReader {
       towingPartners: partners.rows.map((p) => ({ name: p.name, phone: p.phone_e164, notes: p.notes })),
       jsonLd,
       viewer: viewerId
-        ? { leading: row.leading_account_id === viewerId, yourMax: maybeMoney(viewerMax, row.currency), registration: registration.rows[0]?.status ?? null }
+        ? { leading: row.leading_account_id === viewerId, watching: watched.has(row.lot_id), yourMax: maybeMoney(viewerMax, row.currency), registration: registration.rows[0]?.status ?? null }
         : null,
     };
   }

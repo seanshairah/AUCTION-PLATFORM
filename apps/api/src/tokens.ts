@@ -9,6 +9,7 @@ export const FAKE_GATEWAYS = Symbol('FAKE_GATEWAYS');
 export const SETTLEMENT = Symbol('SETTLEMENT');
 export const SELLER = Symbol('SELLER');
 export const VEHICLES = Symbol('VEHICLES');
+export const SAVED_SEARCHES = Symbol('SAVED_SEARCHES');
 
 export interface ApiConfig {
   port: number;

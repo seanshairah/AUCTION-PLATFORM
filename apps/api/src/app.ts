@@ -20,10 +20,12 @@ import { BidDesk } from './bidding/bid-desk';
 import { jsonReplacer } from './http';
 import { logisticsAndSupport } from './logistics/module';
 import { CatalogueReader } from './lots/catalogue-reader';
+import { SavedSearchAlerts } from './watch/saved-search-alerts';
+import { WatchController } from './watch/watch.controller';
 import { AuctionsController, LotsController } from './lots/lots.controller';
 import { readCookie, SESSION_COOKIE, verifySession, type RequestWithAccount } from './session';
 import { SystemController } from './system.controller';
-import { BID_DESK, CATALOGUE, CONFIG, DB, FAKE_GATEWAYS, PAYMENTS, RULEBOOK, SELLER, SETTLEMENT, VEHICLES, type ApiConfig } from './tokens';
+import { BID_DESK, CATALOGUE, CONFIG, DB, FAKE_GATEWAYS, PAYMENTS, RULEBOOK, SAVED_SEARCHES, SELLER, SETTLEMENT, VEHICLES, type ApiConfig } from './tokens';
 
 /**
  * The API process: a NestJS modular monolith (ADR 004) over the domain packages.
@@ -65,7 +67,7 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
   const logisticsSupport = logisticsAndSupport(db, rulebook, { ...process.env, GATE_PASS_SECRET: config.gatePassSecret });
   return {
     module: ApiModule,
-    controllers: [LotsController, AuctionsController, AccountController, SystemController, MoneyController, SellerController, ViewingsController, ...logisticsSupport.controllers, ...ADMIN_CONTROLLERS, ...COMMS_CONTROLLERS, DevController],
+    controllers: [LotsController, AuctionsController, AccountController, SystemController, MoneyController, SellerController, ViewingsController, WatchController, ...logisticsSupport.controllers, ...ADMIN_CONTROLLERS, ...COMMS_CONTROLLERS, DevController],
     providers: [
       { provide: CONFIG, useValue: config },
       { provide: DB, useValue: db },
@@ -77,6 +79,7 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
       { provide: SETTLEMENT, useValue: new SettlementService(db, rulebook, { gatePassSecret: config.gatePassSecret }) },
       { provide: SELLER, useValue: new SellerService(db, rulebook) },
       { provide: VEHICLES, useValue: new VehicleService(db, rulebook) },
+      { provide: SAVED_SEARCHES, useValue: new SavedSearchAlerts(db, catalogue, process.env.PUBLIC_WEB_URL ?? 'http://localhost:3000') },
       ...logisticsSupport.providers,
       ...ADMIN_PROVIDERS,
       ...commsProviders(db, rulebook),

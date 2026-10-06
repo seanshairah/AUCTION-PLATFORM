@@ -3,7 +3,8 @@ import Link from 'next/link';
 import { AutoSubmit } from '@/components/AutoSubmit';
 import { FilterRail } from '@/components/FilterRail';
 import { LotCard, LotRow } from '@/components/LotCards';
-import { api } from '@/lib/api';
+import { SaveSearch } from '@/components/SaveSearch';
+import { api, apiOrNull } from '@/lib/api';
 import { BODY_LABEL, shortDate, titleCase } from '@/lib/format';
 import { HERO_PHOTO } from '@/lib/media';
 import type { AuctionSummary, Facets, LotCard as Lot } from '@/lib/types';
@@ -23,6 +24,8 @@ const SORTS = [
 
 const LABEL: Record<string, (v: string) => string> = {
   q: (v) => `“${v}”`,
+  category: (v) => (v === 'vehicles' ? 'Vehicles' : 'Other goods'),
+  model: (v) => v,
   make: (v) => v,
   yearFrom: (v) => `From ${v}`,
   yearTo: (v) => `To ${v}`,
@@ -51,10 +54,11 @@ export default async function DocketPage({ searchParams }: { searchParams: Promi
     if (typeof v === 'string' && v !== '') params[k] = v;
   }
   const qs = new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([k]) => API_KEYS.includes(k)))).toString();
-  const [list, facets, auctions] = await Promise.all([
+  const [list, facets, auctions, me] = await Promise.all([
     api<{ lots: Lot[]; total: number }>(`/lots${qs ? `?${qs}` : ''}`),
     api<Facets>('/lots/facets'),
     api<AuctionSummary[]>('/auctions'),
+    apiOrNull<{ id: string }>('/me'),
   ]);
   const a = auctions[0];
   const view = params.view === 'list' ? 'list' : 'grid';
@@ -117,6 +121,14 @@ export default async function DocketPage({ searchParams }: { searchParams: Promi
                 </span>
               ))}
               <Link href="/auctions" className="link small" style={{ alignSelf: 'center', marginLeft: 4 }}>Clear all</Link>
+              <span style={{ marginLeft: 'auto' }}>
+                <SaveSearch
+                  query={Object.fromEntries(active.filter(([k]) => k !== 'sort'))}
+                  suggested={active.filter(([k]) => k !== 'sort').map(([k, v]) => LABEL[k]!(v)).join(' · ').replace(/[“”]/g, '')}
+                  signedIn={Boolean(me)}
+                  next={href(params, {})}
+                />
+              </span>
             </div>
           )}
           {list.lots.length === 0 ? (

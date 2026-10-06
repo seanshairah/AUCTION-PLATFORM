@@ -3,6 +3,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { BidPanel } from '@/components/BidPanel';
+import { WatchButton } from '@/components/WatchButton';
 import { Gallery, type GalleryPhoto } from '@/components/Gallery';
 import { LiveRefresher } from '@/components/LiveRefresher';
 import { ReserveStatus } from '@/components/LotCards';
@@ -71,10 +72,13 @@ export default async function LotPage({ params }: Props) {
               <span className="chip night"><MapPinIcon /> {lot.branch.name.replace('ABC Auctions ', '')}</span>
               {demo && <span className="chip night">Demo listing</span>}
             </div>
+            <div className="row" style={{ gap: 8 }}>
+            <WatchButton lotRef={lot.ref} watching={lot.viewer?.watching ?? false} signedIn={Boolean(me)} variant="night" />
             <div className="btn-group">
               <Link href={prev ? `/lots/${encodeURIComponent(prev.ref)}` : '#'} aria-disabled={!prev} className="btn sm outline-night" aria-label="Previous lot" style={prev ? undefined : { opacity: 0.4, pointerEvents: 'none' }}><ChevronLeftIcon /></Link>
               <Link href="/auctions" className="btn sm outline-night"><Squares2X2Icon /> Back to docket</Link>
               <Link href={next ? `/lots/${encodeURIComponent(next.ref)}` : '#'} aria-disabled={!next} className="btn sm outline-night" aria-label="Next lot" style={next ? undefined : { opacity: 0.4, pointerEvents: 'none' }}><ChevronRightIcon /></Link>
+            </div>
             </div>
           </div>
           <h1 className="display d-lg" style={{ marginTop: 20 }}>{lot.title}</h1>

@@ -7,12 +7,14 @@ import type { Me, MyBid } from '@/lib/types';
 export default async function AccountLayout({ children }: { children: React.ReactNode }) {
   const me = await apiOrNull<Me>('/me');
   if (!me) redirect('/sign-in?next=/account/bids');
-  const [bidsOrNull, purchases, feed, cases] = await Promise.all([
+  const [bidsOrNull, purchases, feed, cases, watchList] = await Promise.all([
     apiOrNull<MyBid[]>('/me/bids'),
     apiOrNull<Array<{ status: string }>>('/me/purchases'),
     apiOrNull<{ unread: number }>('/me/notifications?limit=1'),
     apiOrNull<Array<{ status: string }>>('/me/defaults'),
+    apiOrNull<Array<{ result: string }>>('/me/watch'),
   ]);
+  const watching = (watchList ?? []).filter((w) => w.result === 'pending').length;
   const unread = feed?.unread ?? 0;
   const defaults = (cases ?? []).filter((c) => c.status === 'open').length;
   const bids = bidsOrNull ?? [];
@@ -26,6 +28,7 @@ export default async function AccountLayout({ children }: { children: React.Reac
           sections={[
             { title: 'Buying', links: [
               { href: '/account/bids', label: 'My bids', icon: 'bids', count: outbid || open, urgent: outbid > 0 },
+              { href: '/account/watching', label: 'Watching', icon: 'watching', count: watching },
               { href: '/account/purchases', label: 'Purchases', icon: 'purchases', count: unpaid, urgent: unpaid > 0 },
               { href: '/account/wallet', label: 'Wallet', icon: 'wallet' },
             ] },

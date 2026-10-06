@@ -5,6 +5,7 @@ import { sized } from '@/lib/media';
 import type { LotCard as Lot } from '@/lib/types';
 import { Countdown } from './Countdown';
 import { MakeMark } from './Marks';
+import { WatchButton } from './WatchButton';
 
 const RESERVE: Record<Lot['reserveStatus'], [string, string]> = {
   no_reserve: ['No reserve', 'good'],
@@ -56,6 +57,7 @@ function Specs({ lot }: { lot: Lot }) {
 
 export function LotCard({ lot }: { lot: Lot }) {
   return (
+    <div className="lot-shell">
     <Link href={`/lots/${encodeURIComponent(lot.ref)}`} className="lot">
       <Photo lot={lot} />
       <div className="lot-rule">
@@ -81,11 +83,14 @@ export function LotCard({ lot }: { lot: Lot }) {
         <Countdown endsAt={lot.endsAt} />
       </div>
     </Link>
+    <WatchButton lotRef={lot.ref} watching={lot.viewer?.watching ?? false} signedIn={lot.viewer !== null} />
+    </div>
   );
 }
 
 export function LotRow({ lot }: { lot: Lot }) {
   return (
+    <div className="lot-shell row-shell">
     <Link href={`/lots/${encodeURIComponent(lot.ref)}`} className="lot-row">
       <Photo lot={lot} />
       <div className="mid">
@@ -104,5 +109,7 @@ export function LotRow({ lot }: { lot: Lot }) {
         <div className="row between small ink-2"><span>{lot.bids} bids</span><Countdown endsAt={lot.endsAt} /></div>
       </div>
     </Link>
+    <WatchButton lotRef={lot.ref} watching={lot.viewer?.watching ?? false} signedIn={lot.viewer !== null} />
+    </div>
   );
 }

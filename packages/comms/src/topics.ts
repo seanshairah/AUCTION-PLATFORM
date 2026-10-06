@@ -123,13 +123,30 @@ export const PLANNERS: Record<string, Planner> = {
   'lot.ending_soon': async (e, ctx) => {
     const lot = await auctionLot(ctx, e.aggregate_id);
     const leading = e.payload.leading === true;
+    // Someone who saved the lot to their watch list but has not bid hears a watch-list alert.
+    const template = leading ? 'ending_soon_leading' : e.payload.watching === true ? 'ending_soon_saved' : 'ending_soon_watching';
     return [
-      plan(`ending_soon:${e.aggregate_id}`, leading ? 'ending_soon_leading' : 'ending_soon_watching', str(e.payload.accountId), {
+      plan(`ending_soon:${e.aggregate_id}`, template, str(e.payload.accountId), {
         lot: lot.title,
         minutes: String(Math.max(1, Math.round((lot.current_end_at.getTime() - ctx.now.getTime()) / 60_000))),
         price: money(lot.current_price_minor ?? 0n, lot.currency),
         link: lotLink(ctx, lot.lot_ref),
       }, lot.current_end_at),
+    ];
+  },
+
+  // A saved search found lots that were not there when the person last heard (apps/api watch/saved-search-alerts.ts).
+  'saved_search.matched': async (e) => {
+    const count = Number(e.payload.count ?? 0);
+    if (count < 1) return [];
+    return [
+      plan(`saved_search:${e.aggregate_id}:${e.id}`, 'saved_search_match', str(e.payload.accountId), {
+        matches: count === 1 ? '1 new lot' : `${count} new lots`,
+        search: str(e.payload.search),
+        lot: str(e.payload.lotTitle),
+        price: money(e.payload.priceMinor, str(e.payload.currency) === 'ZWG' ? 'ZWG' : 'USD'),
+        link: str(e.payload.link),
+      }),
     ];
   },
 

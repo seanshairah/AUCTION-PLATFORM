@@ -5,25 +5,9 @@ import { BidDesk } from '../bidding/bid-desk';
 import { parseMinor } from '../http';
 import { CurrentAccount, OptionalAccount, type SessionAccount } from '../session';
 import { BID_DESK, CATALOGUE } from '../tokens';
-import { CatalogueReader, type LotFilters } from './catalogue-reader';
+import { CatalogueReader } from './catalogue-reader';
+import { filtersFrom, ListQuery } from './filters';
 
-const ListQuery = z.object({
-  q: z.string().trim().max(100).optional(),
-  category: z.enum(['vehicles', 'other']).optional(),
-  make: z.string().max(60).optional(),
-  model: z.string().max(100).optional(),
-  yearFrom: z.coerce.number().int().min(1900).max(2100).optional(),
-  yearTo: z.coerce.number().int().min(1900).max(2100).optional(),
-  bodyStyle: z.string().max(20).optional(),
-  transmission: z.string().max(20).optional(),
-  fuel: z.string().max(20).optional(),
-  drive: z.string().max(5).optional(),
-  branch: z.string().max(5).optional(),
-  maxPrice: z.string().regex(/^\d{1,9}$/).optional(), // whole currency units
-  noReserve: z.enum(['1', 'true']).optional(),
-  endingWithinHours: z.coerce.number().int().min(1).max(720).optional(),
-  sort: z.enum(['ending_soon', 'newest', 'price_low', 'price_high', 'most_bids']).optional(),
-});
 
 const PreviewBody = z.object({ typed: z.string().max(30) });
 
@@ -49,14 +33,7 @@ export class LotsController {
 
   @Get()
   async list(@Query() query: unknown, @OptionalAccount() account: SessionAccount | null) {
-    const q = parse(ListQuery, query);
-    const filters: LotFilters = {
-      ...q,
-      noReserve: q.noReserve !== undefined,
-      ...(q.maxPrice !== undefined ? { maxPriceMinor: BigInt(q.maxPrice) * 100n } : {}),
-    };
-    delete (filters as { maxPrice?: string }).maxPrice;
-    return this.catalogue.liveLots(filters, account?.id ?? null);
+    return this.catalogue.liveLots(filtersFrom(parse(ListQuery, query)), account?.id ?? null);
   }
 
   @Get('facets')
