@@ -451,7 +451,7 @@ The reference engine implements this in-process over `auction.*` and `bidding.*`
 └── infra/              Terraform, Docker, CI workflows
 ```
 
-Phase 1 adds the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). The `apps/` come with the first API slices.
+Phase 1 added the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). Phase 2 added `packages/engine` (reference bidding engine) and `packages/catalogue` (listing readiness, structured data, saved searches). The `apps/` come with the first API slices.
 
 ## 10. Environments and delivery
 

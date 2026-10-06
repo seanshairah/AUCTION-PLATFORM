@@ -196,6 +196,14 @@ export function validateRuleSet(
         });
       } else {
         checkBands(bands, 'bidding.increment_ladder', `${c} increment ladder (${scopeLabel(record)})`, errors);
+        if (bands.some((b, i) => i > 0 && b.increment < bands[i - 1]!.increment)) {
+          // The proxy engine relies on this: a higher price never has a smaller step (docs/07 §3).
+          errors.push({
+            code: 'increments_decrease',
+            key: 'bidding.increment_ladder',
+            message: `${c} increment ladder (${scopeLabel(record)}): increments must not get smaller as the price rises`,
+          });
+        }
       }
     }
   }

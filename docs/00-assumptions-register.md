@@ -161,6 +161,8 @@ Each open item has a **safe default**: what the System does until someone answer
 | A27 | Minimum deposit per category | **Decision needed** | Hammer and Tongues' US$500 goods / US$3,000 vehicles as BENCHMARK placeholders | ABC Risk |
 | A28 | Minimum photo set for goods | PROPOSED | 4 photos per lot (vehicles 35, D2). Blueprint principle 6 gives no number | ABC Operations |
 | A29 | Rounding of fees and taxes | PROPOSED | Each line rounded half up to the cent; the total is the sum of the lines ([04 §4](04-fee-tax-engine.md#4-rounding)) | ABC Finance |
+| A30 | Proxy details: the price jumps to the reserve as soon as a maximum covers it (which reveals roughly where the reserve is), and only bids that change the price or leader extend the closing time | PROPOSED | `bidding.price_jumps_to_reserve = true`, `bidding.extend_on = price_or_leader_change` ([07 §3–4](07-bidding-engine.md#3-proxy-bidding)) | ABC Commercial |
+| A31 | Until the registration and limits service ships (Phase 3), the commit screen's limit line uses whatever limit ABC's current system can provide through the integration; the server still enforces a limit | ASSUMPTION | Limit line hidden if no source is available ([06 §3](06-commit-screen.md#3-behaviour-as-the-bidder-types)) | Tech lead / ABC IT |
 
 ---
 
@@ -185,4 +187,5 @@ The product owner approved these resolutions on 2026-10-06.
 | Date | Change |
 |---|---|
 | 2026-10-06 | Register created. All defaults adopted by the product owner. Q1–Q10, A12, A15, A16 remain open with their owners |
+| 2026-10-06 | Phase 2: added A30–A31 with the bidding engine and commit screen specs |
 | 2026-10-06 | Phase 1: added A23–A29 found while transcribing the rule set ([03 §10](03-rulebook-service.md#10-the-initial-rule-set)). Every placeholder is tagged in `rulebook/initial-rule-set.json` and must be acknowledged before a rule set is published |

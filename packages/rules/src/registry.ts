@@ -142,6 +142,33 @@ const REVIEW_TRIGGER_LABEL: Record<string, string> = {
   risk_flag: 'accounts with an open risk flag',
   kyc_pending_for_deposit_auction: 'deposit auctions while an ID check is still pending',
 };
+const PHOTO_ROLE_LABEL: Record<string, string> = {
+  overall: 'the whole item',
+  label: 'the label, model or serial number',
+  front: 'front',
+  rear: 'rear',
+  left_side: 'left side',
+  right_side: 'right side',
+  interior_front: 'front interior',
+  interior_rear: 'rear interior',
+  dashboard_odometer: 'dashboard with odometer',
+  engine_bay: 'engine bay',
+  chassis_plate: 'chassis number plate',
+  tyres: 'tyres',
+  boot: 'boot or load bed',
+};
+const CONDITION_LABEL: Record<string, string> = {
+  as_is: 'As Is',
+  working: 'Working',
+  untested: 'Untested',
+  partly_working: 'Partly Working',
+  damaged: 'Damaged',
+  broken: 'Broken',
+  incomplete: 'Incomplete',
+  sealed_packing: 'Sealed Packing',
+  not_working: 'Not Working',
+};
+
 const ALERT_LABEL: Record<string, string> = {
   outbid: 'outbid',
   ending_soon: 'ending soon',
@@ -232,6 +259,26 @@ export const RULES = {
         (missing.length ? ` ${missing.join(' and ')} increments are not yet set.` : '')
       ).trim();
     },
+  }),
+  'bidding.price_jumps_to_reserve': rule({
+    title: 'When a maximum bid reaches the reserve',
+    section: 'Bidding',
+    owner: 'operations',
+    schema: z.boolean(),
+    describe: (v) =>
+      v
+        ? 'If your maximum bid is at or above the reserve, the price moves up to the reserve straight away, so the reserve is shown as met.'
+        : 'The price rises one increment at a time, even past the reserve.',
+  }),
+  'bidding.extend_on': rule({
+    title: 'Which bids extend the closing time',
+    section: 'Bidding',
+    owner: 'operations',
+    schema: z.enum(['price_or_leader_change', 'any_accepted_bid']),
+    describe: (v) =>
+      v === 'price_or_leader_change'
+        ? 'Only a bid that changes the price or the leading bidder extends the closing time. Raising your own maximum while you lead does not.'
+        : 'Every accepted bid near the end extends the closing time.',
   }),
   'bidding.bid_withdrawal': rule({
     title: 'Withdrawing a bid',
@@ -601,6 +648,32 @@ export const RULES = {
     schema: positiveInt,
     scopes: ['category'],
     describe: (v) => `Every lot has at least ${v} photos.`,
+  }),
+  'catalogue.required_photo_roles': rule({
+    title: 'Photos every lot must include',
+    section: 'Lots and vehicles',
+    owner: 'operations',
+    schema: z.array(z.string().min(1)).min(1),
+    scopes: ['category'],
+    describe: (v) => `Photos always show ${list(v.map((r) => PHOTO_ROLE_LABEL[r] ?? r.replaceAll('_', ' ')))}.`,
+  }),
+  'catalogue.defect_photo_conditions': rule({
+    title: 'Photos of faults',
+    section: 'Lots and vehicles',
+    owner: 'operations',
+    schema: z.array(z.string().min(1)),
+    describe: (v) =>
+      v.length === 0
+        ? ''
+        : `Lots described as ${list(v.map((c) => CONDITION_LABEL[c] ?? c))} include a photo and a written note of each fault.`,
+  }),
+  'catalogue.min_description_chars': rule({
+    title: 'Minimum description length',
+    section: 'Lots and vehicles',
+    owner: 'operations',
+    public: false,
+    schema: positiveInt,
+    describe: (v) => `Lot descriptions are at least ${v} characters long.`,
   }),
   'vehicle.require_video': rule({
     title: 'Vehicle video',

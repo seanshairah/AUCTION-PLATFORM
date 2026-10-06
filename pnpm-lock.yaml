@@ -21,7 +21,28 @@ importers:
         specifier: ^3.2.7
         version: 3.2.7(@types/node@22.20.5)(tsx@4.23.15)
 
+  packages/catalogue:
+    dependencies:
+      '@abc/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@abc/quote':
+        specifier: workspace:*
+        version: link:../quote
+      '@abc/rules':
+        specifier: workspace:*
+        version: link:../rules
+
   packages/domain: {}
+
+  packages/engine:
+    dependencies:
+      '@abc/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@abc/rules':
+        specifier: workspace:*
+        version: link:../rules
 
   packages/quote:
     dependencies:

@@ -115,6 +115,8 @@ describe('validation catches contradictions', () => {
     const notAscending = { USD: [{ from: 0, increment: 100 }, { from: 5000, increment: 500 }, { from: 5000, increment: 900 }], ZWG: null };
     expect(errorsOf(setGlobal(INITIAL, 'bidding.increment_ladder', notZero))).toContain('bands_must_start_at_zero');
     expect(errorsOf(setGlobal(INITIAL, 'bidding.increment_ladder', notAscending))).toContain('bands_not_ascending');
+    const shrinking = { USD: [{ from: 0, increment: 500 }, { from: 5000, increment: 100 }], ZWG: null };
+    expect(errorsOf(setGlobal(INITIAL, 'bidding.increment_ladder', shrinking))).toContain('increments_decrease');
   });
 
   it('rejects values that do not match the rule type', () => {

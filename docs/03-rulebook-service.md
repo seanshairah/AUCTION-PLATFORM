@@ -165,7 +165,7 @@ Example output from the initial rule set (tested):
 
 ## 10. The initial rule set
 
-`rulebook/initial-rule-set.json` holds **60 records over 56 keys** transcribed from the blueprint: 10 confirmed, 36 proposed, 8 assumption and 6 benchmark. Each record carries its provenance and source. It validates with **no errors**. Loading it with `pnpm rulebook:sql | psql` creates a **draft** version, plus five tax rates as **inactive** placeholders; publishing stays a two-person step.
+`rulebook/initial-rule-set.json` holds **66 records over 61 keys** transcribed from the blueprint: 10 confirmed, 42 proposed, 8 assumption and 6 benchmark. Phase 2 added the proxy, soft-close and photo-standard rules. Each record carries its provenance and source. It validates with **no errors**. Loading it with `pnpm rulebook:sql | psql` creates a **draft** version, plus five tax rates as **inactive** placeholders; publishing stays a two-person step.
 
 Headline values (full list in the JSON):
 

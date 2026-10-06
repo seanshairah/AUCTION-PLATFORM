@@ -24,11 +24,11 @@ Statements are tagged **CONFIRMED** (stated by the blueprint about ABC), **BENCH
 | 1 | [Assumptions register](docs/00-assumptions-register.md) | 0 Foundations | Done |
 | 2 | [Solution architecture](docs/01-solution-architecture.md) | 0 Foundations | Done |
 | 3 | [Data model](docs/02-data-model.md) + [DDL](db/schema.sql) | 0 Foundations | Done |
-| 4 | [Rulebook service](docs/03-rulebook-service.md) + [initial rule set](rulebook/initial-rule-set.json) + [`packages/rules`](packages/rules/src) | 1 Fix the rules | Ready for review |
-| 5 | [Fee and tax engine](docs/04-fee-tax-engine.md) + [`packages/quote`](packages/quote/src) | 1 Fix the rules | Ready for review |
-| 6 | Lot page and catalogue spec | 2 Informed bids | Not started |
-| 7 | Commit screen spec | 2 Informed bids | Not started (calculation built: `commitPreview`) |
-| 8 | Bidding engine integration spec | 2 Informed bids | Not started |
+| 4 | [Rulebook service](docs/03-rulebook-service.md) + [initial rule set](rulebook/initial-rule-set.json) + [`packages/rules`](packages/rules/src) | 1 Fix the rules | Done |
+| 5 | [Fee and tax engine](docs/04-fee-tax-engine.md) + [`packages/quote`](packages/quote/src) | 1 Fix the rules | Done |
+| 6 | [Lot page and catalogue](docs/05-catalogue-lot-page.md) + [`packages/catalogue`](packages/catalogue/src) | 2 Informed bids | Ready for review |
+| 7 | [Commit screen](docs/06-commit-screen.md) + `commitPreview` in [`packages/quote`](packages/quote/src/commit.ts) | 2 Informed bids | Ready for review |
+| 8 | [Bidding engine integration](docs/07-bidding-engine.md) + [`packages/engine`](packages/engine/src) | 2 Informed bids | Ready for review |
 | 9 | Wallet and ledger module | 3 Money | Not started |
 | 10 | Payments integration | 3 Money | Not started |
 | 11 | Registration and limits service | 3 Money | Not started |
@@ -52,6 +52,8 @@ rulebook/           rule set documents (the initial rule set, transcribed from t
 packages/domain     money: integer minor units, USD and ZiG, formatting, parsing typed amounts
 packages/rules      rule registry, scope resolution, validation, increment ladder, plain-language rendering
 packages/quote      the QuoteService: all-in buyer price, seller proceeds, commit-screen preview
+packages/engine     reference bidding engine: proxy bids, soft close, reserve, closing, replay, bid history
+packages/catalogue  listing readiness (the "all-in price on every lot" gate), structured data, saved searches
 ```
 
 ## Working on it
@@ -61,7 +63,7 @@ Requires Node 22+, pnpm 10 and, for the database tests, PostgreSQL 16 reachable 
 ```sh
 pnpm install
 pnpm typecheck
-pnpm test                 # domain, rules and quote packages
+pnpm test                 # all packages
 db/tests/run.sh           # schema + seed + invariant tests in a temporary database
 pnpm rulebook:sql | psql  # validate the initial rule set and load it as a draft version
 ```
