@@ -224,7 +224,7 @@ export function validateRuleSet(
   }
 
   // Money values not yet set in a currency.
-  const moneyKeys: RuleKey[] = ['limit.history_uplift_cap', 'deposit.minimum', 'override.two_person_threshold'];
+  const moneyKeys: RuleKey[] = ['limit.history_uplift_cap', 'deposit.minimum', 'override.two_person_threshold', 'payments.reconciliation_tolerance'];
   for (const key of moneyKeys) {
     for (const r of rules.filter((x) => x.key === key)) {
       const v = r.value as Record<string, unknown> | null;

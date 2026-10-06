@@ -26,6 +26,12 @@ importers:
 
   apps/api:
     dependencies:
+      '@abc/admin':
+        specifier: workspace:*
+        version: link:../../packages/admin
+      '@abc/analytics':
+        specifier: workspace:*
+        version: link:../../packages/analytics
       '@abc/bidding':
         specifier: workspace:*
         version: link:../../packages/bidding
@@ -112,6 +118,77 @@ importers:
       '@types/react-dom':
         specifier: ^19.3.0
         version: 19.3.0(@types/react@19.3.0)
+
+  packages/admin:
+    dependencies:
+      '@abc/bidding':
+        specifier: workspace:*
+        version: link:../bidding
+      '@abc/catalogue':
+        specifier: workspace:*
+        version: link:../catalogue
+      '@abc/db':
+        specifier: workspace:*
+        version: link:../db
+      '@abc/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@abc/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@abc/limits':
+        specifier: workspace:*
+        version: link:../limits
+      '@abc/rules':
+        specifier: workspace:*
+        version: link:../rules
+      '@abc/settlement':
+        specifier: workspace:*
+        version: link:../settlement
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@abc/payments':
+        specifier: workspace:*
+        version: link:../payments
+      '@abc/quote':
+        specifier: workspace:*
+        version: link:../quote
+
+  packages/analytics:
+    dependencies:
+      '@abc/db':
+        specifier: workspace:*
+        version: link:../db
+      '@abc/domain':
+        specifier: workspace:*
+        version: link:../domain
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@abc/bidding':
+        specifier: workspace:*
+        version: link:../bidding
+      '@abc/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@abc/limits':
+        specifier: workspace:*
+        version: link:../limits
+      '@abc/payments':
+        specifier: workspace:*
+        version: link:../payments
+      '@abc/quote':
+        specifier: workspace:*
+        version: link:../quote
+      '@abc/rules':
+        specifier: workspace:*
+        version: link:../rules
+      '@abc/settlement':
+        specifier: workspace:*
+        version: link:../settlement
 
   packages/bidding:
     dependencies:

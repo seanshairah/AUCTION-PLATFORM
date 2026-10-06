@@ -1,3 +1,4 @@
+import { createAdminServices } from '@abc/admin';
 import { BiddingService } from '@abc/bidding';
 import { connectUrl, loadDotEnv, RulebookStore } from '@abc/db';
 import { RegistrationService } from '@abc/limits';
@@ -12,7 +13,9 @@ import { SettlementService } from '@abc/settlement';
 loadDotEnv();
 const db = connectUrl(undefined, { max: 3 });
 const rulebook = new RulebookStore(db);
-const bidding = new BiddingService(db, rulebook, new RegistrationService(rulebook));
+const registrations = new RegistrationService(rulebook);
+const bidding = new BiddingService(db, rulebook, registrations);
+const admin = createAdminServices(db, rulebook, { registrations, bidding });
 const gatePassSecret = process.env.GATE_PASS_SECRET ?? (process.env.APP_ENV === 'production' ? '' : 'dev-only-gate-pass-secret');
 if (!gatePassSecret) throw new Error('GATE_PASS_SECRET is required in production.');
 const settlement = new SettlementService(db, rulebook, { gatePassSecret });
@@ -31,6 +34,11 @@ export async function tick(now = new Date()): Promise<void> {
     if (issued.length) console.log(`auction ${a.id}: ${issued.length} invoice(s) issued`);
   }
   await settlement.queueDueReminders(now);
+  // Deliverable 18: lapse unapproved overrides; retire rule sets superseded by one now in force.
+  const lapsed = await admin.overrides.expireLapsed(now);
+  if (lapsed) console.log(`${lapsed} override request(s) lapsed`);
+  const retired = await admin.rulebook.retireSuperseded(now);
+  if (retired.length) console.log(`retired superseded rule set(s): ${retired.join(', ')}`);
 }
 
 const once = process.argv.includes('--once');

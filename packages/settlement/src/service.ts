@@ -401,7 +401,20 @@ export class SettlementService {
     const done = new Set(
       (await c.query<{ step: LadderStep }>('SELECT step FROM settlement.default_step WHERE default_case_id = $1', [caseId])).rows.map((r) => r.step),
     );
-    const steps = dueLadderSteps(invoice.due_at, now, done, snapshot);
+    // Steps waived on appeal (deliverable 18) are never applied. A waived forfeit still
+    // cancels the invoice and relists the lots, but returns the deposit instead.
+    const waived = new Set(
+      (await c.query<{ step: LadderStep }>('SELECT step FROM settlement.default_waiver WHERE default_case_id = $1', [caseId])).rows.map((r) => r.step),
+    );
+    const due = dueLadderSteps(invoice.due_at, now, done, snapshot);
+    if (waived.has('deposit_forfeit') && due.includes('deposit_forfeit') && invoice.status === 'overdue') {
+      for (const holdId of await this.auctionDepositHolds(c, invoice.buyer_account_id, invoice.auction_id)) await releaseHoldById(c, holdId);
+      await this.creditInvoice(c, invoice);
+      invoice.status = 'defaulted';
+      await c.query(`UPDATE catalogue.lot SET state = 'listed' WHERE id = ANY($1::uuid[]) AND state = 'payment_overdue'`, [lotIds]);
+      await outbox(c, 'lot.relist_required', 'invoice', invoiceId, { lotIds, forfeitWaived: true });
+    }
+    const steps = due.filter((s) => !waived.has(s));
     for (const step of steps) {
       let journalId: string | null = null;
       if (step === 'warning') {
@@ -432,8 +445,10 @@ export class SettlementService {
       await c.query('INSERT INTO settlement.default_step (default_case_id, step, journal_id) VALUES ($1, $2, $3)', [caseId, step, journalId]);
       done.add(step);
     }
-    if (snapshot.get('settlement.default_ladder').every((s) => done.has(s.step))) {
-      await c.query(`UPDATE settlement.default_case SET status = 'completed', closed_at = now() WHERE id = $1 AND status = 'open'`, [caseId]);
+    const ladder = snapshot.get('settlement.default_ladder');
+    if (ladder.every((s) => done.has(s.step) || waived.has(s.step))) {
+      const allWaived = ladder.every((s) => s.step === 'warning' || waived.has(s.step));
+      await c.query(`UPDATE settlement.default_case SET status = $2, closed_at = now() WHERE id = $1 AND status = 'open'`, [caseId, allWaived ? 'waived' : 'completed']);
     }
     return steps;
   }

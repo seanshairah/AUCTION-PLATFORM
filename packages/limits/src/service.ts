@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Currency } from '@abc/domain';
 import { run, type Client, type Queryable, type RulebookStore } from '@abc/db';
-import { createHold } from '@abc/ledger';
+import { createHold, releaseHoldById } from '@abc/ledger';
 import { quoteLot, type LotPricing } from '@abc/quote';
 import type { RuleSnapshot, TaxRateRecord, Tier } from '@abc/rules';
 import {
@@ -264,6 +264,55 @@ export class RegistrationService {
     );
     const exposureMinor = exposure(p.snapshot, leading, unpaid.rows[0]!.total, p.auctionLotId);
     return { limit, exposureMinor, capacityMinor: capacity(limit.limitMinor, exposureMinor) };
+  }
+
+  /**
+   * A staff decision on a registration in the review queue (docs/10 §3, docs/18 §5).
+   * Approval records the limit at the time of the decision; refusal returns any deposit
+   * held for it. The note is required by the database for staff decisions. Deciding
+   * again with the same outcome returns the first decision (R4).
+   */
+  async decideReview(
+    c: Client,
+    p: { registrationId: string; staffId: string; decision: 'approved' | 'rejected'; note: string },
+  ): Promise<{ status: 'approved' | 'rejected'; alreadyDecided: boolean; limits: Partial<Record<Currency, LimitResult>> }> {
+    const r = await c.query<{ id: string; account_id: string; auction_id: string; status: string }>(
+      'SELECT id, account_id, auction_id, status FROM registration.registration WHERE id = $1 FOR UPDATE',
+      [p.registrationId],
+    );
+    const reg = r.rows[0];
+    if (!reg) throw new Error(`Registration ${p.registrationId} not found`);
+    if (reg.status === p.decision) return { status: p.decision, alreadyDecided: true, limits: {} };
+    if (reg.status !== 'pending_review') throw new Error(`Registration ${p.registrationId} is already ${reg.status}`);
+
+    const limits: Partial<Record<Currency, LimitResult>> = {};
+    if (p.decision === 'approved') {
+      const auction = await this.auctionInfo(c, reg.auction_id);
+      const snapshot = await this.snapshotFor(c, auction.rule_version_id);
+      for (const currency of new Set(auction.lots.map((l) => l.currency))) {
+        limits[currency] = await this.limit(c, reg.account_id, currency, auction.deposit_required, snapshot);
+      }
+    } else {
+      const holds = await c.query<{ id: string }>(
+        `SELECT id FROM ledger.hold WHERE reference_type = 'registration' AND reference_id = $1 AND status = 'active'`,
+        [reg.id],
+      );
+      for (const h of holds.rows) await releaseHoldById(c, h.id);
+    }
+    await c.query(
+      `UPDATE registration.registration
+          SET status = $2, decided_by_type = 'staff', decided_by = $3, decided_at = now(), decision_note = $4,
+              limit_snapshot = CASE WHEN $2 = 'approved' THEN $5::jsonb ELSE limit_snapshot END
+        WHERE id = $1`,
+      [reg.id, p.decision, p.staffId, p.note, JSON.stringify(limits, (_, v) => (typeof v === 'bigint' ? v.toString() : v))],
+    );
+    await c.query('INSERT INTO core.outbox (topic, aggregate_type, aggregate_id, payload) VALUES ($1, $2, $3, $4::jsonb)', [
+      `registration.${p.decision}`,
+      'registration',
+      reg.id,
+      JSON.stringify({ accountId: reg.account_id, auctionId: reg.auction_id, decidedBy: 'staff' }),
+    ]);
+    return { status: p.decision, alreadyDecided: false, limits };
   }
 
   /** Adds to a registration's deposit (e.g. after "Add a deposit to bid higher"). */

@@ -184,3 +184,30 @@ export async function reconcileLedger(q: Queryable): Promise<string[]> {
   }
   return problems;
 }
+
+/**
+ * Posts the exact mirror of a journal already in the ledger, pointing at it
+ * (kind 'reversal'). Idempotent: a journal is reversed at most once, and a repeat
+ * returns the first reversal.
+ */
+export async function reverseJournalById(c: Client, journalId: string, reason: string): Promise<string> {
+  const existing = await c.query<{ id: string }>('SELECT id FROM ledger.journal WHERE reverses_journal_id = $1', [journalId]);
+  if (existing.rows[0]) return existing.rows[0].id;
+  const j = await c.query<{ currency: Currency; reference_type: string | null; reference_id: string | null; kind: string }>(
+    'SELECT currency, reference_type, reference_id, kind FROM ledger.journal WHERE id = $1',
+    [journalId],
+  );
+  const original = j.rows[0];
+  if (!original) throw new Error(`Journal ${journalId} not found`);
+  if (original.kind === 'reversal') throw new Error(`Journal ${journalId} is itself a reversal`);
+  const postings = await c.query<{ book_account_id: string; amount_minor: bigint }>(
+    'SELECT book_account_id, amount_minor FROM ledger.posting WHERE journal_id = $1 ORDER BY id',
+    [journalId],
+  );
+  const lines = postings.rows.map((p) => ({ account: p.book_account_id, amount: big(-p.amount_minor) }));
+  const r = await c.query<{ id: string }>(
+    'SELECT ledger.post_journal($1, $2, $3, $4, $5::jsonb, $6, $7, $8) AS id',
+    ['reversal', original.currency, `reversal:${journalId}`, `Reversal: ${reason}`, JSON.stringify(lines), original.reference_type, original.reference_id, journalId],
+  );
+  return r.rows[0]!.id;
+}

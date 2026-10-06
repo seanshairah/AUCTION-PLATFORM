@@ -5,6 +5,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { BiddingService } from '@abc/bidding';
 import { RulebookStore, type Db } from '@abc/db';
 import { RegistrationService } from '@abc/limits';
+import { ADMIN_CONTROLLERS, ADMIN_PROVIDERS } from './admin';
 import { AccountController } from './bidding/account.controller';
 import { BidDesk } from './bidding/bid-desk';
 import { jsonReplacer } from './http';
@@ -37,13 +38,14 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
   const catalogue = new CatalogueReader(db, rulebook);
   return {
     module: ApiModule,
-    controllers: [LotsController, AccountController, SystemController],
+    controllers: [LotsController, AccountController, SystemController, ...ADMIN_CONTROLLERS],
     providers: [
       { provide: CONFIG, useValue: config },
       { provide: DB, useValue: db },
       { provide: RULEBOOK, useValue: rulebook },
       { provide: CATALOGUE, useValue: catalogue },
       { provide: BID_DESK, useValue: new BidDesk(db, rulebook, registrations, bidding, catalogue) },
+      ...ADMIN_PROVIDERS,
     ],
   };
 }
