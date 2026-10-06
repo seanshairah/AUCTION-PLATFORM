@@ -82,6 +82,7 @@ export interface LotDetail extends Omit<LotCard, 'viewer'> {
     depositMinimum: Money | null;
   } | null;
   towingPartners: Array<{ name: string; phone: string; notes: string | null }>;
+  jsonLd: Record<string, unknown>;
   viewer: { leading: boolean; yourMax: Money | null; registration: string | null } | null;
 }
 

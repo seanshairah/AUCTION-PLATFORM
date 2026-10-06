@@ -3,6 +3,7 @@ import type { Currency } from '@abc/domain';
 import { publicHistory, type LoggedBid } from '@abc/engine';
 import { quoteLot, type LotPricing, type Quote } from '@abc/quote';
 import { ladderFor, minimumNextBid, renderRulebook, type RuleSnapshot, type TaxRateRecord } from '@abc/rules';
+import { lotStructuredData } from '@abc/catalogue';
 import { CHECKLISTS } from '@abc/vehicles';
 import { maybeMoney, moneyJson, type MoneyJson } from '../http';
 
@@ -387,6 +388,23 @@ export class CatalogueReader {
     }
 
     const report = inspection.rows[0];
+    const webUrl = (process.env.PUBLIC_WEB_URL ?? '').replace(/\/$/, '');
+    const absolute = (u: string) => (u.startsWith('http') ? u : `${webUrl}${u}`);
+    const jsonLd = lotStructuredData({
+      lotRef: row.lot_ref,
+      title: row.title,
+      description: row.description,
+      itemState: row.item_state,
+      condition: row.condition,
+      categoryName: row.category_name,
+      currency: row.currency,
+      priceMinor: row.current_price_minor ?? row.starting_bid_minor,
+      endAt: row.current_end_at,
+      status: row.result === 'pending' ? 'live' : 'closed',
+      url: `${webUrl}/lots/${encodeURIComponent(row.lot_ref)}`,
+      imageUrls: media.rows.filter((m) => m.kind === 'photo').slice(0, 6).map((m) => absolute(mediaUrl(m.object_key))),
+      branchCity: row.branch_name.replace('ABC Auctions ', ''),
+    });
     const checklist = report ? CHECKLISTS[report.checklist_version] ?? [] : [];
     return {
       ...card,
@@ -422,6 +440,7 @@ export class CatalogueReader {
         : null,
       rules,
       towingPartners: partners.rows.map((p) => ({ name: p.name, phone: p.phone_e164, notes: p.notes })),
+      jsonLd,
       viewer: viewerId
         ? { leading: row.leading_account_id === viewerId, yourMax: maybeMoney(viewerMax, row.currency), registration: registration.rows[0]?.status ?? null }
         : null,

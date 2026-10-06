@@ -7,6 +7,7 @@ import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import type { Metadata, Viewport } from 'next';
 import { SiteFooter } from '@/components/SiteFooter';
+import { ServiceWorker } from '@/components/ServiceWorker';
 import { SiteHeader } from '@/components/SiteHeader';
 import { apiOrNull } from '@/lib/api';
 import type { Me, Wallet } from '@/lib/types';
@@ -33,6 +34,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <SiteHeader me={me} wallet={wallet} unread={unread?.unread ?? 0} />
         <main>{children}</main>
         <SiteFooter />
+        <ServiceWorker />
       </body>
     </html>
   );

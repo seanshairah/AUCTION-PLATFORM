@@ -60,6 +60,7 @@ export default async function LotPage({ params }: Props) {
   return (
     <>
       {!lot.closed && <LiveRefresher lotRef={lot.ref} />}
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(lot.jsonLd).replace(/</g, '\\u003c') }} />
       <section className="lot-head">
         <div className="wrap inner">
           <div className="row between" style={{ flexWrap: 'wrap', gap: 16 }}>
