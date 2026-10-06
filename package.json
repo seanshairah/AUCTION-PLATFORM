@@ -8,7 +8,12 @@
   "scripts": {
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm -r test",
-    "rulebook:sql": "pnpm --filter @abc/rules gen:sql"
+    "rulebook:sql": "pnpm --filter @abc/rules gen:sql",
+    "db:status": "pnpm --filter @abc/db db status",
+    "db:migrate": "pnpm --filter @abc/db db migrate",
+    "db:rulebook": "pnpm --filter @abc/db db load-rulebook",
+    "demo:seed": "pnpm --filter @abc/api demo:seed",
+    "db:reset": "pnpm --filter @abc/db db reset"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

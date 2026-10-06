@@ -845,9 +845,12 @@ CREATE TABLE catalogue.vehicle (
   fuel                text,
   transmission        text,
   colour              text,
-  documents_status    text NOT NULL DEFAULT 'unknown' CHECK (documents_status IN ('complete', 'incomplete', 'unknown'))
+  documents_status    text NOT NULL DEFAULT 'unknown' CHECK (documents_status IN ('complete', 'incomplete', 'unknown')),
+  body_style          text CHECK (body_style IN ('sedan', 'hatchback', 'suv', 'pickup', 'van', 'truck', 'bus', 'coupe', 'wagon', 'other')),
+  drive               text CHECK (drive IN ('2wd', '4wd', 'awd'))   -- migration 0001
 );
 CREATE INDEX vehicle_chassis_idx ON catalogue.vehicle (chassis_number);
+CREATE INDEX vehicle_make_model_idx ON catalogue.vehicle (make, model);
 
 -- Detailed checklist and remedy: deliverable 14.
 CREATE TABLE catalogue.inspection_report (

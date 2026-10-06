@@ -103,3 +103,60 @@ jobs:
           psql -X -q -v ON_ERROR_STOP=1 -d rulebook -f db/seed.sql
           psql -X -q -v ON_ERROR_STOP=1 -d rulebook -f rules.sql
           psql -X -v ON_ERROR_STOP=1 -d rulebook -c "SELECT v.label, v.status, count(*) AS records FROM rulebook.rule_set_version v JOIN rulebook.rule_value r ON r.version_id = v.id GROUP BY 1, 2"
+
+  apps:
+    name: Migrate, seed demo data, serve the API and web app
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # A throwaway CI database; real connection strings live in secrets, never here.
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      DB_DRIVER: pg
+      APP_ENV: ci
+      DEMO_SIGN_IN: '1'
+      SESSION_SECRET: ci-only-session-secret-not-used-anywhere-else
+      API_URL: http://localhost:4000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Migrate an empty database (baseline records later migrations)
+        run: |
+          pnpm -s db:migrate
+          pnpm -s db:migrate | grep -q "up to date"
+          pnpm -s db:status
+      - name: Load the initial rule set as a draft, then seed demo data
+        run: |
+          pnpm -s db:rulebook
+          pnpm -s demo:seed
+      - name: Build the web app
+        run: pnpm --filter @abc/web build
+      - name: Serve both and request the main screens
+        shell: bash
+        run: |
+          pnpm --filter @abc/api start > api.log 2>&1 &
+          pnpm --filter @abc/web start > web.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf localhost:4000/health > /dev/null && curl -sf localhost:3000/auctions > /dev/null && break; sleep 1; done
+          ref=$(curl -sf "localhost:4000/lots?q=Hilux" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).lots[0].ref))')
+          for path in /auctions "/auctions?bodyStyle=pickup" "/lots/$ref" /rules /sign-in; do
+            code=$(curl -s -o page.html -w '%{http_code}' "localhost:3000$path")
+            echo "$path -> $code"; test "$code" = 200
+          done
+          grep -q "Inspection report" <(curl -sf "localhost:3000/lots/$ref")
+      - name: Logs
+        if: always()
+        run: tail -n 50 api.log web.log || true

@@ -171,6 +171,8 @@ Each open item has a **safe default**: what the System does until someone answer
 | A38 | A gross inaccuracy is a differing chassis or engine number, an odometer off by more than 10 %, or a failing material item that the report called fine | PROPOSED | Rule `vehicle.odometer_tolerance_bp = 1000` ([13 §4](13-vehicle-module.md#4-the-gross-inaccuracy-remedy)) | ABC Commercial / counsel |
 | A39 | No commission consignment note can be signed until commission is published (a consequence of Q3), so no seller signs "to be confirmed" terms | PROPOSED | `CommissionNotPublishedError` ([12 §3](12-seller-portal.md#3-consigning-and-the-consignment-note)) | ABC Commercial |
 | A40 | Valuation ranges are the middle half (25th to 75th percentile) of at least 5 comparable sales in the last 12 months | PROPOSED | Rule `seller.valuation_min_comparables = 5` ([12 §4](12-seller-portal.md#4-valuation-range)) | ABC Operations |
+| A41 | Development and staging databases may hold **demo data**: a rule set labelled `-demo` with an illustrative 10 % commission (Q3) and the initial rule set's tax rates activated (Q9), plus demo accounts, a vehicle auction and bids. Every such value is labelled "DEMO ONLY" where it is stored. The seed refuses `APP_ENV=production` and never changes the rulebook once a real rule set is published. Because the ledger and audit log are append-only, demo data is removed only by `db reset` (drops every System schema) | PROPOSED | `apps/api/src/demo/seed.ts`, `pnpm db:reset` ([14 §5](14-apps-and-environments.md#5-demo-data)) | ABC Product |
+| A42 | Until the identity module ships (email and phone OTP, KYC), development and staging may sign in as a demo bidder (`DEMO_SIGN_IN=1`). The session token and every check after sign-in are the production ones; the switch is refused in production | PROPOSED | [14 §3](14-apps-and-environments.md#3-sessions-and-sign-in) | ABC Product / security |
 | A31 | Until the registration and limits service ships (Phase 3), the commit screen's limit line uses whatever limit ABC's current system can provide through the integration; the server still enforces a limit | ASSUMPTION | Limit line hidden if no source is available ([06 §3](06-commit-screen.md#3-behaviour-as-the-bidder-types)) | Tech lead / ABC IT |
 
 ---
@@ -195,6 +197,7 @@ The product owner approved these resolutions on 2026-10-06.
 
 | Date | Change |
 |---|---|
+| 2026-10-06 | Apps layer: added A41 (demo data) and A42 (demo sign-in) with the API, worker and web app |
 | 2026-10-06 | Register created. All defaults adopted by the product owner. Q1–Q10, A12, A15, A16 remain open with their owners |
 | 2026-10-06 | Phase 4: added A37–A40 with the seller portal and vehicle module |
 | 2026-10-06 | Phase 3: corrected A20 (invoices use the auction's pinned rule set, so the bill always matches the commit screen); added A32–A36 |

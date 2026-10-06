@@ -1,0 +1,404 @@
+import type { Db, RulebookStore } from '@abc/db';
+import type { Currency } from '@abc/domain';
+import { publicHistory, type LoggedBid } from '@abc/engine';
+import { quoteLot, type LotPricing, type Quote } from '@abc/quote';
+import { ladderFor, minimumNextBid, renderRulebook, type RuleSnapshot, type TaxRateRecord } from '@abc/rules';
+import { CHECKLISTS } from '@abc/vehicles';
+import { maybeMoney, moneyJson, type MoneyJson } from '../http';
+
+/**
+ * Read models for the catalogue screens. Every price shown comes from quoteLot
+ * with the auction's pinned rule version: the same function and the same rules
+ * the commit screen, the bid check and the invoice use (architecture rule R2).
+ */
+
+export interface LotFilters {
+  q?: string;
+  category?: 'vehicles' | 'other';
+  make?: string;
+  model?: string;
+  yearFrom?: number;
+  yearTo?: number;
+  bodyStyle?: string;
+  transmission?: string;
+  fuel?: string;
+  drive?: string;
+  branch?: string;
+  maxPriceMinor?: bigint;
+  noReserve?: boolean;
+  endingWithinHours?: number;
+  sort?: 'ending_soon' | 'newest' | 'price_low' | 'price_high' | 'most_bids';
+}
+
+interface LotRow {
+  auction_lot_id: string;
+  lot_id: string;
+  lot_ref: string;
+  title: string;
+  description: string;
+  category_code: string;
+  category_name: string;
+  is_vehicle: boolean;
+  tax_class: string;
+  item_state: string;
+  item_state_label: string;
+  condition: string;
+  condition_label: string;
+  condition_notes: string | null;
+  location_branch: string;
+  branch_name: string;
+  currency: Currency;
+  starting_bid_minor: bigint;
+  reserve_minor: bigint | null;
+  current_price_minor: bigint | null;
+  current_end_at: Date;
+  scheduled_end_at: Date;
+  extension_count: number;
+  result: string;
+  leading_account_id: string | null;
+  auction_id: string;
+  auction_code: string;
+  auction_title: string;
+  rule_version_id: string | null;
+  deposit_required: boolean;
+  make: string | null;
+  model: string | null;
+  year: number | null;
+  odometer_km: number | null;
+  transmission: string | null;
+  fuel: string | null;
+  body_style: string | null;
+  drive: string | null;
+  colour: string | null;
+  zimbabwe_registered: boolean | null;
+  documents_status: string | null;
+  inspection_summary: string | null;
+  bid_count: bigint;
+  bidder_count: bigint;
+  photo_count: bigint;
+  created_at: Date;
+}
+
+const LOT_SELECT = `
+SELECT al.id AS auction_lot_id, l.id AS lot_id, l.lot_ref, l.title, l.description, l.category_code, c.name AS category_name,
+       l.is_vehicle, l.tax_class, l.item_state, ist.label AS item_state_label, l.condition, ct.label AS condition_label, l.condition_notes,
+       l.location_branch, b.name AS branch_name, al.currency, al.starting_bid_minor, al.reserve_minor, al.current_price_minor,
+       al.current_end_at, al.scheduled_end_at, al.extension_count, al.result, al.leading_account_id,
+       a.id AS auction_id, a.code AS auction_code, a.title AS auction_title, a.rule_version_id, a.deposit_required,
+       v.make, v.model, v.year, v.odometer_km, v.transmission, v.fuel, v.body_style, v.drive, v.colour, v.zimbabwe_registered, v.documents_status,
+       ir.summary AS inspection_summary,
+       (SELECT count(*) FROM bidding.bid x WHERE x.auction_lot_id = al.id AND x.outcome_at_placement <> 'rejected') AS bid_count,
+       (SELECT count(DISTINCT x.account_id) FROM bidding.bid x WHERE x.auction_lot_id = al.id AND x.outcome_at_placement <> 'rejected') AS bidder_count,
+       (SELECT count(*) FROM catalogue.lot_media m WHERE m.lot_id = l.id AND m.kind = 'photo') AS photo_count,
+       l.created_at
+  FROM auction.auction_lot al
+  JOIN auction.auction a ON a.id = al.auction_id
+  JOIN catalogue.lot l ON l.id = al.lot_id
+  JOIN catalogue.category c ON c.code = l.category_code
+  JOIN catalogue.item_state_term ist ON ist.code = l.item_state
+  JOIN catalogue.condition_term ct ON ct.code = l.condition
+  JOIN core.branch b ON b.code = l.location_branch
+  LEFT JOIN catalogue.vehicle v ON v.lot_id = l.id
+  LEFT JOIN LATERAL (
+    SELECT summary FROM catalogue.inspection_report r
+     WHERE r.lot_id = l.id AND r.published_at IS NOT NULL ORDER BY r.published_at DESC LIMIT 1
+  ) ir ON true`;
+
+const SORTS: Record<NonNullable<LotFilters['sort']>, string> = {
+  ending_soon: 'al.current_end_at ASC',
+  newest: 'l.created_at DESC',
+  price_low: 'coalesce(al.current_price_minor, al.starting_bid_minor) ASC',
+  price_high: 'coalesce(al.current_price_minor, al.starting_bid_minor) DESC',
+  most_bids: 'bid_count DESC, al.current_end_at ASC',
+};
+
+export interface LotCard {
+  id: string;
+  ref: string;
+  title: string;
+  category: { code: string; name: string };
+  isVehicle: boolean;
+  vehicle: {
+    make: string;
+    model: string;
+    year: number | null;
+    odometerKm: number | null;
+    transmission: string | null;
+    fuel: string | null;
+    bodyStyle: string | null;
+    drive: string | null;
+    colour: string | null;
+    zimbabweRegistered: boolean;
+  } | null;
+  branch: { code: string; name: string };
+  auction: { id: string; code: string; title: string; depositRequired: boolean };
+  currency: Currency;
+  startingBid: MoneyJson;
+  currentPrice: MoneyJson | null;
+  nextMinimum: MoneyJson;
+  /** What the buyer pays in total if they win at the next minimum bid. */
+  allInAtNextMinimum: MoneyJson | null;
+  bids: number;
+  bidders: number;
+  endsAt: string;
+  extended: boolean;
+  reserveStatus: 'no_reserve' | 'met' | 'not_met';
+  inspectionSummary: string | null;
+  photoCount: number;
+  viewer: { leading: boolean } | null;
+}
+
+export class CatalogueReader {
+  private categoryParents: Map<string, string | null> | null = null;
+
+  constructor(
+    private readonly db: Db,
+    private readonly rulebook: RulebookStore,
+  ) {}
+
+  private async categoryPath(code: string): Promise<string[]> {
+    if (!this.categoryParents) {
+      const r = await this.db.query<{ code: string; parent_code: string | null }>('SELECT code, parent_code FROM catalogue.category');
+      this.categoryParents = new Map(r.rows.map((x) => [x.code, x.parent_code]));
+    }
+    const path: string[] = [];
+    for (let c: string | null | undefined = code; c; c = this.categoryParents.get(c)) path.unshift(c);
+    return path;
+  }
+
+  async pricing(row: Pick<LotRow, 'currency' | 'tax_class' | 'category_code' | 'is_vehicle'>): Promise<LotPricing> {
+    return { currency: row.currency, taxClass: row.tax_class, categoryPath: await this.categoryPath(row.category_code), isVehicle: row.is_vehicle };
+  }
+
+  /** Quote at a hammer price, or null when the lot cannot be priced (bidding is then paused for it). */
+  quoteOrNull(pricing: LotPricing, hammerMinor: bigint, snapshot: RuleSnapshot, taxRates: readonly TaxRateRecord[], at: Date): Quote | null {
+    try {
+      return quoteLot({ lot: pricing, hammerMinor, snapshot, taxRates, at });
+    } catch {
+      return null;
+    }
+  }
+
+  private async card(row: LotRow, taxRates: readonly TaxRateRecord[], viewerId: string | null, at: Date): Promise<LotCard> {
+    const pricing = await this.pricing(row);
+    let nextMinimum = row.starting_bid_minor;
+    let allIn: Quote | null = null;
+    if (row.rule_version_id) {
+      const snapshot = await this.rulebook.snapshot(row.rule_version_id);
+      try {
+        nextMinimum = minimumNextBid({ startingBidMinor: row.starting_bid_minor, currentPriceMinor: row.current_price_minor }, ladderFor(snapshot, row.currency, { categoryPath: pricing.categoryPath }));
+      } catch {
+        // No increment ladder for this currency yet (ZiG, Q4): the lot cannot be bid on.
+      }
+      allIn = this.quoteOrNull(pricing, nextMinimum, snapshot, taxRates, at);
+    }
+    return {
+      id: row.auction_lot_id,
+      ref: row.lot_ref,
+      title: row.title,
+      category: { code: row.category_code, name: row.category_name },
+      isVehicle: row.is_vehicle,
+      vehicle: row.make
+        ? {
+            make: row.make,
+            model: row.model!,
+            year: row.year,
+            odometerKm: row.odometer_km,
+            transmission: row.transmission,
+            fuel: row.fuel,
+            bodyStyle: row.body_style,
+            drive: row.drive,
+            colour: row.colour,
+            zimbabweRegistered: Boolean(row.zimbabwe_registered),
+          }
+        : null,
+      branch: { code: row.location_branch, name: row.branch_name },
+      auction: { id: row.auction_id, code: row.auction_code, title: row.auction_title, depositRequired: row.deposit_required },
+      currency: row.currency,
+      startingBid: moneyJson(row.starting_bid_minor, row.currency),
+      currentPrice: maybeMoney(row.current_price_minor, row.currency),
+      nextMinimum: moneyJson(nextMinimum, row.currency),
+      allInAtNextMinimum: allIn ? moneyJson(allIn.totalMinor, row.currency) : null,
+      bids: Number(row.bid_count),
+      bidders: Number(row.bidder_count),
+      endsAt: row.current_end_at.toISOString(),
+      extended: row.extension_count > 0,
+      reserveStatus: row.reserve_minor === null ? 'no_reserve' : (row.current_price_minor ?? -1n) >= row.reserve_minor ? 'met' : 'not_met',
+      inspectionSummary: row.inspection_summary,
+      photoCount: Number(row.photo_count),
+      viewer: viewerId ? { leading: row.leading_account_id === viewerId } : null,
+    };
+  }
+
+  async liveLots(filters: LotFilters, viewerId: string | null, at = new Date()): Promise<{ lots: LotCard[]; total: number }> {
+    const where = [`a.status = 'open'`, `al.result = 'pending'`, `l.state = 'live'`];
+    const params: unknown[] = [];
+    const p = (v: unknown) => {
+      params.push(v);
+      return `$${params.length}`;
+    };
+    if (filters.q) where.push(`(l.title ILIKE ${p(`%${filters.q}%`)} OR l.lot_ref ILIKE ${p(`%${filters.q}%`)})`);
+    if (filters.category === 'vehicles') where.push('l.is_vehicle');
+    if (filters.category === 'other') where.push('NOT l.is_vehicle');
+    if (filters.make) where.push(`v.make = ${p(filters.make)}`);
+    if (filters.model) where.push(`v.model = ${p(filters.model)}`);
+    if (filters.yearFrom) where.push(`v.year >= ${p(filters.yearFrom)}`);
+    if (filters.yearTo) where.push(`v.year <= ${p(filters.yearTo)}`);
+    if (filters.bodyStyle) where.push(`v.body_style = ${p(filters.bodyStyle)}`);
+    if (filters.transmission) where.push(`v.transmission = ${p(filters.transmission)}`);
+    if (filters.fuel) where.push(`v.fuel = ${p(filters.fuel)}`);
+    if (filters.drive) where.push(`v.drive = ${p(filters.drive)}`);
+    if (filters.branch) where.push(`l.location_branch = ${p(filters.branch)}`);
+    if (filters.maxPriceMinor !== undefined) where.push(`coalesce(al.current_price_minor, al.starting_bid_minor) <= ${p(filters.maxPriceMinor.toString())}`);
+    if (filters.noReserve) where.push('al.reserve_minor IS NULL');
+    if (filters.endingWithinHours) where.push(`al.current_end_at <= ${p(new Date(at.getTime() + filters.endingWithinHours * 3_600_000))}`);
+    const order = SORTS[filters.sort ?? 'ending_soon'];
+    const r = await this.db.query<LotRow>(`${LOT_SELECT} WHERE ${where.join(' AND ')} ORDER BY ${order} LIMIT 200`, params);
+    const taxRates = await this.rulebook.taxRates();
+    const lots = [];
+    for (const row of r.rows) lots.push(await this.card(row, taxRates, viewerId, at));
+    return { lots, total: lots.length };
+  }
+
+  /** Values to filter by, with how many live lots have each. */
+  async facets(): Promise<Record<string, Array<{ value: string; count: number }>>> {
+    const r = await this.db.query<{ facet: string; value: string; count: bigint }>(
+      `WITH live AS (
+         SELECT l.id, l.location_branch, l.is_vehicle FROM auction.auction_lot al
+           JOIN auction.auction a ON a.id = al.auction_id JOIN catalogue.lot l ON l.id = al.lot_id
+          WHERE a.status = 'open' AND al.result = 'pending' AND l.state = 'live')
+       SELECT 'make' AS facet, v.make AS value, count(*) FROM live JOIN catalogue.vehicle v ON v.lot_id = live.id GROUP BY v.make
+       UNION ALL SELECT 'model', v.make || ' ' || v.model, count(*) FROM live JOIN catalogue.vehicle v ON v.lot_id = live.id GROUP BY v.make, v.model
+       UNION ALL SELECT 'year', v.year::text, count(*) FROM live JOIN catalogue.vehicle v ON v.lot_id = live.id WHERE v.year IS NOT NULL GROUP BY v.year
+       UNION ALL SELECT 'bodyStyle', v.body_style, count(*) FROM live JOIN catalogue.vehicle v ON v.lot_id = live.id WHERE v.body_style IS NOT NULL GROUP BY v.body_style
+       UNION ALL SELECT 'transmission', v.transmission, count(*) FROM live JOIN catalogue.vehicle v ON v.lot_id = live.id WHERE v.transmission IS NOT NULL GROUP BY v.transmission
+       UNION ALL SELECT 'fuel', v.fuel, count(*) FROM live JOIN catalogue.vehicle v ON v.lot_id = live.id WHERE v.fuel IS NOT NULL GROUP BY v.fuel
+       UNION ALL SELECT 'drive', v.drive, count(*) FROM live JOIN catalogue.vehicle v ON v.lot_id = live.id WHERE v.drive IS NOT NULL GROUP BY v.drive
+       UNION ALL SELECT 'branch', live.location_branch, count(*) FROM live GROUP BY live.location_branch
+       UNION ALL SELECT 'category', CASE WHEN live.is_vehicle THEN 'vehicles' ELSE 'other' END, count(*) FROM live GROUP BY live.is_vehicle`,
+    );
+    const out: Record<string, Array<{ value: string; count: number }>> = {};
+    for (const row of r.rows) (out[row.facet] ??= []).push({ value: row.value, count: Number(row.count) });
+    for (const list of Object.values(out)) list.sort((a, b) => a.value.localeCompare(b.value, 'en', { numeric: true }));
+    return out;
+  }
+
+  async lotRow(idOrRef: string): Promise<LotRow | null> {
+    const byId = /^[0-9a-f-]{36}$/.test(idOrRef);
+    const r = await this.db.query<LotRow>(`${LOT_SELECT} WHERE ${byId ? 'al.id = $1' : 'l.lot_ref = $1'} ORDER BY al.scheduled_end_at DESC LIMIT 1`, [idOrRef]);
+    return r.rows[0] ?? null;
+  }
+
+  async lotDetail(idOrRef: string, viewerId: string | null, at = new Date()) {
+    const row = await this.lotRow(idOrRef);
+    if (!row) return null;
+    const taxRates = await this.rulebook.taxRates();
+    const card = await this.card(row, taxRates, viewerId, at);
+    const pricing = await this.pricing(row);
+
+    const [bids, inspection, media, partners, registration] = await Promise.all([
+      this.db.query<{ sequence_no: bigint; account_id: string; origin: 'bidder' | 'proxy'; amount_minor: bigint; max_amount_minor: bigint | null; outcome_at_placement: LoggedBid['outcome']; server_received_at: Date }>(
+        `SELECT sequence_no, account_id, origin, amount_minor, max_amount_minor, outcome_at_placement, server_received_at
+           FROM bidding.bid WHERE auction_lot_id = $1 ORDER BY sequence_no`,
+        [row.auction_lot_id],
+      ),
+      this.db.query<{ id: string; checklist_version: string; inspected_at: Date; published_at: Date; odometer_km: number | null; photo_count: number; has_video: boolean; summary: string; items: Record<string, { answer: string; note?: string }>; chassis_verified: boolean; engine_verified: boolean }>(
+        `SELECT id, checklist_version, inspected_at, published_at, odometer_km, photo_count, has_video, summary, items, chassis_verified, engine_verified
+           FROM catalogue.inspection_report WHERE lot_id = $1 AND published_at IS NOT NULL ORDER BY published_at DESC LIMIT 1`,
+        [row.lot_id],
+      ),
+      this.db.query<{ kind: string; role: string; object_key: string }>('SELECT kind, role, object_key FROM catalogue.lot_media WHERE lot_id = $1 ORDER BY sort', [row.lot_id]),
+      row.is_vehicle
+        ? this.db.query<{ name: string; phone_e164: string; notes: string | null }>(
+            `SELECT name, phone_e164, notes FROM logistics.partner WHERE kind = 'towing' AND active AND $1 = ANY (branches) ORDER BY name`,
+            [row.location_branch],
+          )
+        : Promise.resolve({ rows: [] as Array<{ name: string; phone_e164: string; notes: string | null }> }),
+      viewerId
+        ? this.db.query<{ status: string }>('SELECT status FROM registration.registration WHERE account_id = $1 AND auction_id = $2', [viewerId, row.auction_id])
+        : Promise.resolve({ rows: [] as Array<{ status: string }> }),
+    ]);
+
+    const logged: LoggedBid[] = bids.rows.map((b) => ({
+      seq: b.sequence_no,
+      accountId: b.account_id,
+      origin: b.origin,
+      amountMinor: b.amount_minor,
+      outcome: b.outcome_at_placement,
+      at: b.server_received_at,
+    }));
+    const viewerMax = viewerId
+      ? bids.rows.filter((b) => b.account_id === viewerId && b.origin === 'bidder' && b.outcome_at_placement !== 'rejected').reduce<bigint | null>((m, b) => (b.max_amount_minor !== null && (m === null || b.max_amount_minor > m) ? b.max_amount_minor : m), null)
+      : null;
+
+    let breakdown: Quote | null = null;
+    let rules: { versionLabel: string; softCloseSeconds: number; claimWindowHours: number | null; payWindowHours: number | null; collectWindowHours: number | null; depositMinimum: MoneyJson | null } | null = null;
+    if (row.rule_version_id) {
+      const snapshot = await this.rulebook.snapshot(row.rule_version_id);
+      breakdown = this.quoteOrNull(pricing, BigInt(card.nextMinimum.minor), snapshot, taxRates, at);
+      const ctx = { categoryPath: pricing.categoryPath, currency: row.currency };
+      const safe = <T>(fn: () => T): T | null => {
+        try {
+          return fn();
+        } catch {
+          return null;
+        }
+      };
+      const deposit = safe(() => (snapshot.get('deposit.minimum', ctx) as Partial<Record<Currency, number | null>>)[row.currency] ?? null);
+      rules = {
+        versionLabel: snapshot.label,
+        softCloseSeconds: snapshot.get('bidding.soft_close_seconds', ctx),
+        claimWindowHours: safe(() => snapshot.get('dispute.claim_window_hours_after_release', ctx)),
+        payWindowHours: safe(() => snapshot.get('settlement.pay_window_hours', ctx)),
+        collectWindowHours: safe(() => snapshot.get('settlement.collect_window_hours', ctx)),
+        depositMinimum: row.deposit_required && deposit !== null ? moneyJson(BigInt(deposit), row.currency) : null,
+      };
+    }
+
+    const report = inspection.rows[0];
+    const checklist = report ? CHECKLISTS[report.checklist_version] ?? [] : [];
+    return {
+      ...card,
+      description: row.description,
+      itemState: { code: row.item_state, label: row.item_state_label },
+      condition: { code: row.condition, label: row.condition_label, notes: row.condition_notes },
+      documentsStatus: row.documents_status,
+      scheduledEndAt: row.scheduled_end_at.toISOString(),
+      closed: row.result !== 'pending',
+      result: row.result,
+      media: media.rows.map((m) => ({ kind: m.kind, role: m.role })),
+      inspection: report
+        ? {
+            publishedAt: report.published_at.toISOString(),
+            inspectedAt: report.inspected_at.toISOString(),
+            checklistVersion: report.checklist_version,
+            summary: report.summary,
+            odometerKm: report.odometer_km,
+            photoCount: report.photo_count,
+            hasVideo: report.has_video,
+            identityVerified: report.chassis_verified && report.engine_verified,
+            sections: [...new Set(checklist.map((i) => i.section))].map((section) => ({
+              section,
+              items: checklist
+                .filter((i) => i.section === section)
+                .map((i) => ({ id: i.id, label: i.label, material: i.material, answer: report.items[i.id]?.answer ?? 'missing', note: report.items[i.id]?.note ?? null })),
+            })),
+          }
+        : null,
+      history: publicHistory(logged, viewerId ?? undefined).map((h) => ({ seq: h.seq.toString(), bidder: h.bidder, amount: moneyJson(h.amountMinor, row.currency), auto: h.auto, at: h.at.toISOString() })),
+      breakdown: breakdown
+        ? { atHammer: card.nextMinimum, lines: breakdown.lines.map((l) => ({ type: l.type, description: l.description, amount: moneyJson(l.amountMinor, row.currency) })), total: moneyJson(breakdown.totalMinor, row.currency), ruleVersionId: breakdown.ruleVersionId }
+        : null,
+      rules,
+      towingPartners: partners.rows.map((p) => ({ name: p.name, phone: p.phone_e164, notes: p.notes })),
+      viewer: viewerId
+        ? { leading: row.leading_account_id === viewerId, yourMax: maybeMoney(viewerMax, row.currency), registration: registration.rows[0]?.status ?? null }
+        : null,
+    };
+  }
+
+  async publicRules(at = new Date()) {
+    const versionId = await this.rulebook.activeVersionId(at);
+    return renderRulebook(await this.rulebook.snapshot(versionId));
+  }
+}

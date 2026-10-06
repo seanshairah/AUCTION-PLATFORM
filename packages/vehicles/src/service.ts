@@ -25,6 +25,11 @@ export interface VehicleDetails {
   zimbabweRegistered: boolean;
   odometerKm?: number;
   documentsStatus: 'complete' | 'incomplete' | 'unknown';
+  fuel?: 'petrol' | 'diesel' | 'hybrid' | 'electric' | 'lpg';
+  transmission?: 'manual' | 'automatic';
+  colour?: string;
+  bodyStyle?: 'sedan' | 'hatchback' | 'suv' | 'pickup' | 'van' | 'truck' | 'bus' | 'coupe' | 'wagon' | 'other';
+  drive?: '2wd' | '4wd' | 'awd';
 }
 
 type Staff = Actor & { type: 'staff' };
@@ -42,12 +47,15 @@ export class VehicleService {
   async setDetails(staff: Staff, lotId: string, d: VehicleDetails): Promise<void> {
     await this.db.tx(staff, (c) =>
       c.query(
-        `INSERT INTO catalogue.vehicle (lot_id, make, model, year, chassis_number, engine_number, registration_number, zimbabwe_registered, odometer_km, documents_status)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        `INSERT INTO catalogue.vehicle (lot_id, make, model, year, chassis_number, engine_number, registration_number, zimbabwe_registered, odometer_km,
+                                        documents_status, fuel, transmission, colour, body_style, drive)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
          ON CONFLICT (lot_id) DO UPDATE SET make = $2, model = $3, year = $4, chassis_number = $5, engine_number = $6,
-           registration_number = $7, zimbabwe_registered = $8, odometer_km = $9, documents_status = $10`,
+           registration_number = $7, zimbabwe_registered = $8, odometer_km = $9, documents_status = $10,
+           fuel = $11, transmission = $12, colour = $13, body_style = $14, drive = $15`,
         [lotId, d.make, d.model, d.year ?? null, normaliseIdNumber(d.chassisNumber), d.engineNumber ? normaliseIdNumber(d.engineNumber) : null,
-         d.registrationNumber ?? null, d.zimbabweRegistered, d.odometerKm ?? null, d.documentsStatus],
+         d.registrationNumber ?? null, d.zimbabweRegistered, d.odometerKm ?? null, d.documentsStatus,
+         d.fuel ?? null, d.transmission ?? null, d.colour ?? null, d.bodyStyle ?? null, d.drive ?? null],
       ),
     );
   }

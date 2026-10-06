@@ -40,6 +40,7 @@ Statements are tagged **CONFIRMED** (stated by the blueprint about ABC), **BENCH
 | 17 | Support and disputes | 5 Reach | Not started |
 | 18 | Admin and operations console | 5 Reach | Not started |
 | 19 | Analytics | 5 Reach (instrumented from Phase 1) | Not started |
+| — | [Apps and environments](docs/14-apps-and-environments.md): API, worker, web, migrations, demo data | After Phase 4 | Ready for review (design provisional) |
 
 ## Repository layout
 
@@ -62,6 +63,9 @@ packages/bidding    bidding service: server checks, engine under the lot lock, b
 packages/settlement invoices at close, one-tap payment, QR gate pass, release, payouts, reminders, default ladder
 packages/seller     consignments, e-signed consignment note, valuation, live bids view, statements, bulk upload, WhatsApp intake
 packages/vehicles   inspection checklist and reports, gross-inaccuracy check, viewing slots, title tracker, towing partners
+apps/api            NestJS API over the packages, the worker (closing, invoicing, reminders) and the demo seed
+apps/web            Next.js buyer screens: auctions dashboard, lot page with the commit screen, my bids, wallet, fees and rules
+db/migrations       forward-only migrations for long-lived databases (schema.sql stays canonical)
 ```
 
 ## Working on it
@@ -76,4 +80,18 @@ db/tests/run.sh           # schema + seed + invariant tests in a temporary datab
 pnpm rulebook:sql | psql  # validate the initial rule set and load it as a draft version
 ```
 
-CI runs all of these on every push.
+### Running the System
+
+Copy [`.env.example`](.env.example) to `.env` (untracked) and set `DATABASE_URL`. Set `DB_DRIVER=neon-ws` only where TCP 5432 is blocked (Neon over HTTPS). The connection string is a secret: keep it in `.env` or the secrets manager, never in the repository.
+
+```sh
+pnpm db:migrate                       # baseline (schema + seed) on an empty database, then db/migrations
+pnpm db:rulebook                      # load the initial rule set as a draft
+pnpm demo:seed                        # development/staging only: demo vehicle auction (A41)
+pnpm --filter @abc/api start          # API on :4000  (DEMO_SIGN_IN=1 for the demo bidders, A42)
+pnpm --filter @abc/api worker         # closes lots, issues invoices, queues reminders
+pnpm --filter @abc/web dev            # web on :3000
+pnpm db:reset --confirm <database>    # drop every System schema (removes demo data; refused in production)
+```
+
+CI runs all of these on every push, including a job that migrates, seeds, serves the API and web, and requests the main screens.

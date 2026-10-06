@@ -428,14 +428,16 @@ The reference engine implements this in-process over `auction.*` and `bidding.*`
 | 009 | Bought services behind System-owned interfaces (§7); two gateways from day one | Approved | Blueprint build-or-buy table; avoids the retrofit failure mode | — |
 | 010 | Product analytics: PostHog; operational reporting: Metabase on the read replica | Approved | Blueprint build-or-buy: analytics is *Buy* | — |
 | 011 | Observability: OpenTelemetry traces and metrics, Sentry for errors, Grafana dashboards | Approved | Standard tooling | — |
+| 012 | **Migrations:** `db/schema.sql` stays canonical; changes to existing databases go in forward-only `db/migrations/NNNN_*.sql`, also folded into `schema.sql`. A database built from the baseline records every existing migration as applied | Approved 2026-10-06 | Tests and CI keep building from one readable schema file, while long-lived databases change only through recorded, checksummed steps ([14 §4](14-apps-and-environments.md#4-database-connection-and-migrations)) | Migration volume makes the folded schema hard to review |
+| 013 | **Database driver:** node-postgres over TCP by default; Neon's WebSocket driver (`DB_DRIVER=neon-ws`, same wire protocol on port 443) where only HTTPS is allowed | Approved 2026-10-06 | The development database is hosted on Neon (PostgreSQL 18); some build environments allow only HTTPS. Same SQL, same transactions, no code differences above `connectUrl` | — |
 
 ## 9. Repository layout
 
 ```
 /
 ├── apps/
-│   ├── api/            NestJS app: API, worker and realtime entrypoints
-│   ├── web/            Next.js public site + PWA
+│   ├── api/            NestJS app: API and worker entrypoints, demo seed (built)
+│   ├── web/            Next.js public site + PWA (built: buyer screens)
 │   ├── admin/          Next.js admin console
 │   └── mobile/         Expo app
 ├── packages/
@@ -451,7 +453,7 @@ The reference engine implements this in-process over `auction.*` and `bidding.*`
 └── infra/              Terraform, Docker, CI workflows
 ```
 
-Phase 1 added the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). Phase 2 added `packages/engine` (reference bidding engine) and `packages/catalogue` (listing readiness, structured data, saved searches). Phase 3 added the database-backed modules `packages/db`, `ledger`, `limits`, `payments`, `bidding` and `settlement`, each owning its schema as described in §4. Phase 4 added `packages/seller` and `packages/vehicles`. The `apps/` (API, worker, web, admin, mobile) wrap these modules next.
+Phase 1 added the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). Phase 2 added `packages/engine` (reference bidding engine) and `packages/catalogue` (listing readiness, structured data, saved searches). Phase 3 added the database-backed modules `packages/db`, `ledger`, `limits`, `payments`, `bidding` and `settlement`, each owning its schema as described in §4. Phase 4 added `packages/seller` and `packages/vehicles`. After Phase 4, `apps/api` (NestJS API, worker, demo seed) and `apps/web` (Next.js buyer screens) wrapped these modules, and `db/migrations/` started ([14](14-apps-and-environments.md)). The admin console and mobile app come later; realtime push is not built yet (the web app refreshes after each action).
 
 ## 10. Environments and delivery
 

@@ -7,11 +7,18 @@
   "types": "src/index.ts",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "db": "tsx src/cli/db.ts"
   },
   "dependencies": {
     "@abc/domain": "workspace:*",
     "@abc/rules": "workspace:*",
-    "pg": "^8.23.1"
+    "@neondatabase/serverless": "^1.2.0",
+    "https-proxy-agent": "^9.1.0",
+    "pg": "^8.23.1",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.2"
   }
 }

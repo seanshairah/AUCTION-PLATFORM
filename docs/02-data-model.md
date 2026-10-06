@@ -221,6 +221,7 @@ stateDiagram-v2
 - A vehicle cannot go from `paid` to `released`; it must pass `title_hold`. A non-vehicle cannot enter `title_hold`.
 - A vehicle cannot enter `released` unless its `logistics.title_case` is `complete`. A title case cannot be `complete` unless ZRP, ZIMRA and CVR steps are all `done`, and a step cannot be `done` without evidence.
 - The vehicle flag must match the lot's category (composite foreign key) and is fixed once the lot leaves `draft`.
+- `catalogue.vehicle` records make, model, year, chassis and engine numbers (normalised), registration, odometer, fuel, transmission, colour, documents status, and, from migration `0001`, body style and drive (each from a fixed list) for search filters.
 - A collection cannot become `ready` or `released` against an unpaid invoice.
 - Every transition writes an `audit.event` with the actor, and fails if no actor was set.
 

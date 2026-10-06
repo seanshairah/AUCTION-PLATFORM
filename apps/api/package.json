@@ -1,0 +1,39 @@
+{
+  "name": "@abc/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "dev": "tsx watch src/main.ts",
+    "worker": "tsx src/worker.ts",
+    "demo:seed": "tsx src/demo/cli.ts",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@abc/bidding": "workspace:*",
+    "@abc/catalogue": "workspace:*",
+    "@abc/db": "workspace:*",
+    "@abc/domain": "workspace:*",
+    "@abc/engine": "workspace:*",
+    "@abc/ledger": "workspace:*",
+    "@abc/limits": "workspace:*",
+    "@abc/payments": "workspace:*",
+    "@abc/quote": "workspace:*",
+    "@abc/rules": "workspace:*",
+    "@abc/settlement": "workspace:*",
+    "@abc/vehicles": "workspace:*",
+    "@nestjs/common": "^12.1.2",
+    "@nestjs/core": "^12.1.2",
+    "@nestjs/platform-express": "^12.1.2",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.3.1"
+  }
+}
