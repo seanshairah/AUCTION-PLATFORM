@@ -229,7 +229,11 @@ describe('public rulebook rendering', () => {
     expect(text('settlement.pay_window_hours')).toBe('Pay within 48 hours of the invoice.');
     expect(text('bidding.soft_close_seconds')).toBe("A bid near the end extends the lot's closing time by 10 minutes.");
     expect(text('limit.base')).toBe(
-      'Email and phone verified: US$100.00 · ZiG: not yet set. ID verified as well: US$500.00 · ZiG: not yet set.',
+      'Email and phone verified: US$100.00 (ZiG amount not yet set). ID verified as well: US$500.00 (ZiG amount not yet set).',
+    );
+    expect(text('bidding.increment_ladder')).toBe(
+      'Each bid must beat the current price by at least US$1.00 under US$50.00, US$5.00 from US$50.00, US$10.00 from US$200.00, ' +
+        'US$50.00 from US$1,000.00, US$100.00 from US$5,000.00, US$250.00 from US$20,000.00. ZiG increments are not yet set.',
     );
     expect(text('settlement.default_ladder')).toBe(
       'When the time to pay runs out, you get a warning; 24 hours after that, your deposit is forfeited and the lot is offered again; 24 hours after that, a relisting fee is charged; 24 hours after that, your account becomes Restricted.',
@@ -239,6 +243,23 @@ describe('public rulebook rendering', () => {
   it('shows overrides next to the default', () => {
     const photos = all.find((r) => r.key === 'catalogue.min_photos');
     expect(photos?.overrides).toEqual([{ scope: { type: 'category', ref: 'vehicles' }, text: 'Every lot has at least 35 photos.' }]);
+  });
+
+  it('keeps internal rules and switched-off rules off the public page', () => {
+    expect(text('tax.calculation_order')).toBeUndefined();
+    expect(text('bidding.soft_close_allowed_seconds')).toBeUndefined();
+    expect(text('storage.daily_rate_bp')).toBeUndefined();
+    expect(text('storage.enabled')).toBe('There is no storage charge.');
+    const staffView = renderRulebook(snapshot, { includeInternal: true }).sections.flatMap((s) => s.rules);
+    expect(staffView.some((r) => r.key === 'tax.calculation_order')).toBe(true);
+  });
+
+  it('uses catalogue names and handles singular amounts', () => {
+    const named = renderRulebook(snapshot, { context: { categoryName: (c) => ({ it: 'IT and electronics' })[c] ?? c } });
+    const t = (k: RuleKey) => named.sections.flatMap((s) => s.rules).find((r) => r.key === k)?.text;
+    expect(t('deposit.required_categories')).toBe('You need a deposit to bid in these auctions: vehicles, IT and electronics, catering, special.');
+    const restricted = all.find((r) => r.key === 'limit.deposit_multiplier')?.overrides[0]?.text;
+    expect(restricted).toBe('Your limit equals your deposit, all-in.');
   });
 
   it('says plainly when commission is not yet published', () => {

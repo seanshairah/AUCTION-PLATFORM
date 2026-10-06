@@ -25,6 +25,11 @@ export const SECTIONS = [
 ] as const;
 export type Section = (typeof SECTIONS)[number];
 
+/** Names the renderer may need (category display names come from the catalogue). */
+export interface RenderContext {
+  categoryName: (code: string) => string;
+}
+
 interface RuleDefinition<S extends z.ZodType> {
   title: string;
   section: Section;
@@ -32,14 +37,16 @@ interface RuleDefinition<S extends z.ZodType> {
   schema: S;
   /** Scope types this rule may be set for. Always includes 'global'. */
   scopes: readonly ScopeType[];
+  /** false for internal rules that staff see but the public rulebook does not. */
+  public: boolean;
   /** Plain-language sentence for the public rulebook and help pages. */
-  describe: (value: z.infer<S>) => string;
+  describe: (value: z.infer<S>, ctx: RenderContext) => string;
 }
 
 function rule<S extends z.ZodType>(
-  def: Omit<RuleDefinition<S>, 'scopes'> & { scopes?: readonly ScopeType[] },
+  def: Omit<RuleDefinition<S>, 'scopes' | 'public'> & { scopes?: readonly ScopeType[]; public?: boolean },
 ): RuleDefinition<S> {
-  return { ...def, scopes: ['global', ...(def.scopes ?? [])] };
+  return { ...def, public: def.public ?? true, scopes: ['global', ...(def.scopes ?? [])] };
 }
 
 // ---------------------------------------------------------------------------
@@ -99,11 +106,59 @@ function hours(h: number): string {
   return `${h} hour${h === 1 ? '' : 's'}`;
 }
 
+/** "US$500.00 or ZiG 9,000.00" · "US$500.00 (ZiG amount not yet set)" */
 export function describeMoneyByCurrency(value: MoneyByCurrency): string {
-  const parts = (['USD', 'ZWG'] as Currency[]).map((c) =>
-    value[c] === null ? `${c === 'USD' ? 'USD' : 'ZiG'}: not yet set` : formatMinor(BigInt(value[c]!), c),
-  );
-  return parts.join(' · ');
+  const usd = value.USD === null ? null : formatMinor(BigInt(value.USD), 'USD');
+  const zwg = value.ZWG === null ? null : formatMinor(BigInt(value.ZWG), 'ZWG');
+  if (usd && zwg) return `${usd} or ${zwg}`;
+  if (usd) return `${usd} (ZiG amount not yet set)`;
+  if (zwg) return `${zwg} (USD amount not yet set)`;
+  return 'not yet set';
+}
+
+const TIER_LABEL: Record<string, string> = { guest: 'Guest', verified: 'Verified', trusted: 'Trusted', restricted: 'Restricted' };
+const TAX_LABEL: Record<string, string> = {
+  purchasers_levy: "purchaser's levy",
+  vat: 'VAT',
+  imtt: 'IMTT',
+  transfer_tax: 'transfer tax',
+};
+const TAX_CLASS_LABEL: Record<string, string> = {
+  goods_standard: 'Most goods',
+  vehicle_standard: 'Vehicles',
+  vehicle_used_zw: 'Zimbabwe-registered used vehicles',
+  delivery_service: 'Delivery',
+};
+const CHANNEL_LABEL: Record<string, string> = {
+  whatsapp: 'WhatsApp',
+  push: 'app notification',
+  sms: 'SMS',
+  email: 'email',
+  in_app: 'in the app',
+};
+const REVIEW_TRIGGER_LABEL: Record<string, string> = {
+  tier_restricted: 'Restricted accounts',
+  linked_to_seller: 'accounts linked to a seller in the auction',
+  risk_flag: 'accounts with an open risk flag',
+  kyc_pending_for_deposit_auction: 'deposit auctions while an ID check is still pending',
+};
+const ALERT_LABEL: Record<string, string> = {
+  outbid: 'outbid',
+  ending_soon: 'ending soon',
+  won: 'you won',
+  invoice: 'invoice',
+  payment_reminder: 'payment reminder',
+  collection_ready: 'ready to collect',
+};
+
+function increments(bands: IncrementBands, c: Currency): string {
+  return bands
+    .map((b, i) => {
+      const inc = formatMinor(BigInt(b.increment), c);
+      if (i === 0 && bands.length > 1) return `${inc} under ${formatMinor(BigInt(bands[1]!.from), c)}`;
+      return `${inc} from ${formatMinor(BigInt(b.from), c)}`;
+    })
+    .join(', ');
 }
 
 function percent(bp: number): string {
@@ -132,6 +187,7 @@ export const RULES = {
     title: 'Soft-close values allowed per auction',
     section: 'Bidding',
     owner: 'operations',
+    public: false,
     schema: z.array(positiveInt).min(1),
     describe: (v) => `An auction may use a soft close of ${v.map(duration).join(', ')}.`,
   }),
@@ -168,14 +224,14 @@ export const RULES = {
     owner: 'operations',
     schema: z.object({ USD: incrementBands.nullable(), ZWG: incrementBands.nullable() }).strict(),
     scopes: ['category'],
-    describe: (v) =>
-      (['USD', 'ZWG'] as Currency[])
-        .map((c) =>
-          v[c] === null
-            ? `${c === 'USD' ? 'USD' : 'ZiG'}: not yet set`
-            : v[c]!.map((b) => `from ${formatMinor(BigInt(b.from), c)}, bid at least ${formatMinor(BigInt(b.increment), c)} more`).join('; '),
-        )
-        .join(' · '),
+    describe: (v) => {
+      const parts = (['USD', 'ZWG'] as Currency[]).flatMap((c) => (v[c] === null ? [] : [increments(v[c]!, c)]));
+      const missing = (['USD', 'ZWG'] as Currency[]).filter((c) => v[c] === null).map((c) => (c === 'USD' ? 'USD' : 'ZiG'));
+      return (
+        (parts.length ? `Each bid must beat the current price by at least ${parts.join('; in ZiG: ')}.` : '') +
+        (missing.length ? ` ${missing.join(' and ')} increments are not yet set.` : '')
+      ).trim();
+    },
   }),
   'bidding.bid_withdrawal': rule({
     title: 'Withdrawing a bid',
@@ -229,7 +285,10 @@ export const RULES = {
     section: 'Registration and limits',
     owner: 'risk',
     schema: z.array(z.enum(['tier_restricted', 'linked_to_seller', 'risk_flag', 'kyc_pending_for_deposit_auction'])),
-    describe: (v) => `A registration goes to staff review only for: ${list(v.map((t) => t.replaceAll('_', ' ')))}.`,
+    describe: (v) =>
+      v.length === 0
+        ? 'No registration needs a staff review.'
+        : `A registration is reviewed by staff only for ${list(v.map((t) => REVIEW_TRIGGER_LABEL[t] ?? t))}.`,
   }),
   'limit.formula': rule({
     title: 'How your bidding limit is worked out',
@@ -253,7 +312,10 @@ export const RULES = {
     owner: 'risk',
     schema: positiveInt,
     scopes: ['tier'],
-    describe: (v) => `Each dollar of deposit lets you bid up to ${v} dollars, all-in.`,
+    describe: (v) =>
+      v === 1
+        ? 'Your limit equals your deposit, all-in.'
+        : `Your deposit counts ${v} times towards your limit, all-in: a US$100 deposit lets you bid up to US$${(100 * v).toLocaleString('en-US')} in total.`,
   }),
   'limit.history_uplift_bp': rule({
     title: 'History bonus',
@@ -304,7 +366,7 @@ export const RULES = {
       })
       .strict(),
     describe: (v) =>
-      `You become Trusted after ${v.minPaidInvoices12m} invoices paid on time in 12 months, with ${v.maxDefaults12m === 0 ? 'no' : `at most ${v.maxDefaults12m}`} missed payments, an account at least ${v.minAccountAgeDays} days old, and ID verified${v.requireMfa ? ' and two-step sign-in turned on' : ''}.`,
+      `You become Trusted after ${v.minPaidInvoices12m} invoices paid on time in 12 months, with ${v.maxDefaults12m === 0 ? 'no' : `at most ${v.maxDefaults12m}`} missed payments, an account at least ${v.minAccountAgeDays} days old, your ID verified${v.requireMfa ? ', and two-step sign-in turned on' : ''}.`,
   }),
   'tier.restricted_review_after_months': rule({
     title: 'Leaving Restricted',
@@ -320,7 +382,7 @@ export const RULES = {
     section: 'Deposits',
     owner: 'risk',
     schema: z.array(z.string().min(1)),
-    describe: (v) => `A deposit is needed to bid in: ${list(v)}.`,
+    describe: (v, ctx) => `You need a deposit to bid in these auctions: ${list(v.map(ctx.categoryName))}.`,
   }),
   'deposit.minimum': rule({
     title: 'Minimum deposit',
@@ -328,7 +390,7 @@ export const RULES = {
     owner: 'risk',
     schema: moneyByCurrency,
     scopes: ['category'],
-    describe: (v) => `Minimum deposit: ${describeMoneyByCurrency(v)}.`,
+    describe: (v) => `The minimum deposit is ${describeMoneyByCurrency(v)}.`,
   }),
 
   // Paying and collecting -----------------------------------------------------
@@ -388,7 +450,7 @@ export const RULES = {
     section: 'Paying and collecting',
     owner: 'finance',
     schema: z.object({ rateBp: basisPoints, minimum: moneyByCurrency }).strict(),
-    describe: (v) => `${percent(v.rateBp)} of the hammer price, at least ${describeMoneyByCurrency(v.minimum)}.`,
+    describe: (v) => `The relisting fee is ${percent(v.rateBp)} of the hammer price, at least ${describeMoneyByCurrency(v.minimum)}.`,
   }),
   'settlement.forfeit_seller_share_bp': rule({
     title: 'Share of a forfeited deposit paid to the seller',
@@ -440,15 +502,16 @@ export const RULES = {
     schema: z.record(z.string().min(1), z.array(z.enum(TAX_CODES))),
     describe: (v) =>
       Object.entries(v)
-        .map(([cls, codes]) => `${cls.replaceAll('_', ' ')}: ${list(codes.map((c) => c.replaceAll('_', ' ')))}`)
-        .join('; ') + '.',
+        .map(([cls, codes]) => `${TAX_CLASS_LABEL[cls] ?? cls}: ${codes.length ? list(codes.map((c) => TAX_LABEL[c] ?? c)) : 'no tax'}`)
+        .join('. ') + '.',
   }),
   'tax.calculation_order': rule({
     title: 'Order in which taxes are worked out',
     section: 'Fees, commission and tax',
     owner: 'finance',
+    public: false,
     schema: z.array(z.enum(TAX_CODES)).min(1),
-    describe: (v) => `Taxes are worked out in this order: ${list(v.map((c) => c.replaceAll('_', ' ')))}.`,
+    describe: (v) => `Taxes are worked out in this order: ${list(v.map((c) => TAX_LABEL[c] ?? c))}.`,
   }),
   'money.rounding': rule({
     title: 'Rounding',
@@ -484,19 +547,20 @@ export const RULES = {
     section: 'Delivery and storage',
     owner: 'operations',
     schema: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/),
-    describe: (v) => `Paid and booked by ${v} for next-day delivery.`,
+    describe: (v) => `Pay and book delivery by ${v} for delivery the next day.`,
   }),
   'delivery.excluded_categories': rule({
     title: 'Goods we cannot deliver',
     section: 'Delivery and storage',
     owner: 'operations',
     schema: z.array(z.string().min(1)),
-    describe: (v) => `We do not deliver: ${list(v)}.`,
+    describe: (v, ctx) => `We do not deliver ${list(v.map((c) => ctx.categoryName(c).toLowerCase()))}; these must be collected.`,
   }),
   'delivery.tax_class': rule({
     title: 'Tax on delivery',
     section: 'Delivery and storage',
     owner: 'finance',
+    public: false,
     schema: z.string().min(1),
     describe: (v) => `Delivery is taxed as: ${v.replaceAll('_', ' ')}.`,
   }),
@@ -564,11 +628,11 @@ export const RULES = {
       z.object({ channels: z.array(channel).min(1), fallbackAfterSeconds: positiveInt }).strict(),
     ),
     describe: (v) =>
-      'We send alerts on WhatsApp first. If a message is not delivered, we try the next channel: ' +
+      'We send alerts on WhatsApp first. If a message is not delivered, we try the next way of reaching you: ' +
       Object.entries(v)
-        .map(([k, p]) => `${k.replaceAll('_', ' ')} (${p.channels.join(' → ')})`)
+        .map(([k, p]) => `${ALERT_LABEL[k] ?? k} (${p.channels.map((c) => CHANNEL_LABEL[c] ?? c).join(' → ')})`)
         .join('; ') +
-      '. Email is always kept as the record.',
+      '. We also email you a copy for your records.',
   }),
   'comms.ending_soon_minutes': rule({
     title: '"Ending soon" alert',
@@ -585,7 +649,7 @@ export const RULES = {
     owner: 'finance',
     schema: moneyByCurrency,
     describe: (v) =>
-      `Any staff refund, bid removal or limit change above ${describeMoneyByCurrency(v)} needs a second staff member to approve. Every override is recorded with a name and reason.`,
+      `A staff refund, bid removal or limit change above ${describeMoneyByCurrency(v)} needs a second staff member's approval. Every override is recorded with a name and reason.`,
   }),
   'security.payout_destination_cooling_off_hours': rule({
     title: 'Changing payout details',
@@ -599,7 +663,10 @@ export const RULES = {
     section: 'Security and overrides',
     owner: 'risk',
     schema: z.array(z.enum(TIERS)),
-    describe: (v) => `Two-step sign-in is required for ${list(v)} accounts and for all ABC staff.`,
+    describe: (v) =>
+      v.length === 0
+        ? 'Two-step sign-in is optional for customers and required for all ABC staff.'
+        : `Two-step sign-in is required for ${list(v.map((t) => TIER_LABEL[t] ?? t))} accounts and for all ABC staff.`,
   }),
   'operations.outage_extension': rule({
     title: 'If the system goes down during a close',

@@ -158,7 +158,7 @@ Placeholder rates (BENCHMARK, Q9): levy 15 % on hammer, VAT 15.5 % on hammer + p
 | No silent currency borrowing | ZiG lot with USD-only rates is refused |
 | Screen equals bill | `commitPreview` and the invoice call the same `quoteLot`; the bid stores the quoted total and version (database check requires both on every bidder's bid) |
 
-Run: `pnpm test` (74 tests across `domain`, `rules` and `quote`).
+Run: `pnpm test` (76 tests across `domain`, `rules` and `quote`).
 
 ## 13. Open items for finance
 

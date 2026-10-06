@@ -132,7 +132,7 @@ rulebook.taxRates(at: Date): TaxRateRecord[]            // active rows effective
 
 ## 8. One rulebook, rendered everywhere
 
-`renderRulebook(snapshot)` (`packages/rules/src/render.ts`) turns every rule into a plain-language sentence, grouped into ten sections. Scoped overrides are listed beside the default (e.g. "Vehicles: every lot has at least 35 photos."). Every channel shows the rules from this one output:
+`renderRulebook(snapshot)` (`packages/rules/src/render.ts`) turns every rule into a plain-language sentence, grouped into ten sections. Scoped overrides are listed beside the default (e.g. "Vehicles: every lot has at least 35 photos."). Internal rules (tax calculation order, the soft-close test values, delivery's tax class) appear only in the staff view, and rules that depend on a switched-off rule (storage rates while storage is off) are hidden. Category names come from the catalogue. Every channel shows the rules from this one output:
 
 | Channel | How it uses the rulebook |
 |---|---|
@@ -146,7 +146,8 @@ Example output from the initial rule set (tested):
 
 > **Time to pay.** Pay within 48 hours of the invoice.
 > **If you do not pay in time.** When the time to pay runs out, you get a warning; 24 hours after that, your deposit is forfeited and the lot is offered again; 24 hours after that, a relisting fee is charged; 24 hours after that, your account becomes Restricted.
-> **Free allowance by verification.** Email and phone verified: US$100.00 · ZiG: not yet set. ID verified as well: US$500.00 · ZiG: not yet set.
+> **Free allowance by verification.** Email and phone verified: US$100.00 (ZiG amount not yet set). ID verified as well: US$500.00 (ZiG amount not yet set).
+> **Bid increments.** Each bid must beat the current price by at least US$1.00 under US$50.00, US$5.00 from US$50.00, US$10.00 from US$200.00, US$50.00 from US$1,000.00, US$100.00 from US$5,000.00, US$250.00 from US$20,000.00. ZiG increments are not yet set.
 > **Seller commission.** Commission rates are being confirmed and will be published here.
 
 ## 9. Admin console needs
@@ -221,4 +222,4 @@ Blueprint gate: **"one rulebook, no contradictions."** The contradictions are re
 | `packages/rules/src/increments.ts` | Increment ladder: minimum next bid, bid check, quick-bid steps |
 | `packages/rules/src/render.ts` | Plain-language rulebook for every channel |
 | `packages/rules/src/cli/to-sql.ts` | Loads a rule set document into the database as a draft; refuses invalid documents |
-| `packages/rules/src/rules.test.ts` | 28 tests covering the initial rule set, each contradiction check, resolution, increments and rendering |
+| `packages/rules/src/rules.test.ts` | 30 tests covering the initial rule set, each contradiction check, resolution, increments and rendering |
