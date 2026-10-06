@@ -13,7 +13,7 @@ Every feature must pass one test: *does it shorten time to cash for the seller, 
 3. **Append-only audit.** Every state change has a server time, actor and reason; staff overrides above a threshold need a second person.
 4. **Idempotency everywhere.** Payments by gateway reference, bids by client request ID, notifications by (message, channel, recipient).
 
-Rules 1–4 are enforced in the database schema itself; see [`db/tests/invariants.sql`](db/tests/invariants.sql).
+Rules 1, 3 and 4 are enforced in the database schema itself ([`db/tests/invariants.sql`](db/tests/invariants.sql)). Rule 2 is enforced by one rule registry and one quote function shared by every screen and the invoice ([`packages/rules`](packages/rules/src), [`packages/quote`](packages/quote/src)).
 
 ## Deliverables
 
@@ -21,13 +21,13 @@ Statements are tagged **CONFIRMED** (stated by the blueprint about ABC), **BENCH
 
 | # | Deliverable | Phase | Status |
 |---|---|---|---|
-| 1 | [Assumptions register](docs/00-assumptions-register.md) | 0 Foundations | Ready for review |
-| 2 | [Solution architecture](docs/01-solution-architecture.md) | 0 Foundations | Ready for review |
-| 3 | [Data model](docs/02-data-model.md) + [DDL](db/schema.sql) | 0 Foundations | Ready for review |
-| 4 | Rulebook service spec | 1 Fix the rules | Not started |
-| 5 | Fee and tax engine spec | 1 Fix the rules | Not started |
+| 1 | [Assumptions register](docs/00-assumptions-register.md) | 0 Foundations | Done |
+| 2 | [Solution architecture](docs/01-solution-architecture.md) | 0 Foundations | Done |
+| 3 | [Data model](docs/02-data-model.md) + [DDL](db/schema.sql) | 0 Foundations | Done |
+| 4 | [Rulebook service](docs/03-rulebook-service.md) + [initial rule set](rulebook/initial-rule-set.json) + [`packages/rules`](packages/rules/src) | 1 Fix the rules | Ready for review |
+| 5 | [Fee and tax engine](docs/04-fee-tax-engine.md) + [`packages/quote`](packages/quote/src) | 1 Fix the rules | Ready for review |
 | 6 | Lot page and catalogue spec | 2 Informed bids | Not started |
-| 7 | Commit screen spec | 2 Informed bids | Not started |
+| 7 | Commit screen spec | 2 Informed bids | Not started (calculation built: `commitPreview`) |
 | 8 | Bidding engine integration spec | 2 Informed bids | Not started |
 | 9 | Wallet and ledger module | 3 Money | Not started |
 | 10 | Payments integration | 3 Money | Not started |
@@ -44,20 +44,26 @@ Statements are tagged **CONFIRMED** (stated by the blueprint about ABC), **BENCH
 ## Repository layout
 
 ```
-docs/          numbered deliverables
-db/schema.sql  canonical PostgreSQL 16 schema, one schema per module
-db/seed.sql    reference data: branches, condition vocabulary, example categories
-db/tests/      invariant tests and runner
+docs/               numbered deliverables
+db/schema.sql       canonical PostgreSQL 16 schema, one schema per module
+db/seed.sql         reference data: branches, condition vocabulary, example categories
+db/tests/           database invariant tests and runner
+rulebook/           rule set documents (the initial rule set, transcribed from the blueprint)
+packages/domain     money: integer minor units, USD and ZiG, formatting, parsing typed amounts
+packages/rules      rule registry, scope resolution, validation, increment ladder, plain-language rendering
+packages/quote      the QuoteService: all-in buyer price, seller proceeds, commit-screen preview
 ```
 
-The application scaffold (NestJS API, Next.js web and admin, Expo app) starts in Phase 1; see [architecture §9](docs/01-solution-architecture.md#9-repository-layout).
+## Working on it
 
-## Running the schema tests
-
-Requires PostgreSQL 16 client tools and a server reachable through the usual `PG*` environment variables.
+Requires Node 22+, pnpm 10 and, for the database tests, PostgreSQL 16 reachable through the usual `PG*` environment variables.
 
 ```sh
-db/tests/run.sh
+pnpm install
+pnpm typecheck
+pnpm test                 # domain, rules and quote packages
+db/tests/run.sh           # schema + seed + invariant tests in a temporary database
+pnpm rulebook:sql | psql  # validate the initial rule set and load it as a draft version
 ```
 
-The script creates a temporary database, loads the schema and seed data, runs the invariant tests and drops the database. CI runs the same script on every change under `db/`.
+CI runs all of these on every push.

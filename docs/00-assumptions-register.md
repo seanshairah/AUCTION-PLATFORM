@@ -153,7 +153,14 @@ Each open item has a **safe default**: what the System does until someone answer
 | A19 | Peak load for capacity planning: 2,000 concurrent bidders, 50 bids per second at a staggered close, 5,000 live lots | ASSUMPTION | No ABC traffic figures exist; the Android app's 100,000+ installs (CONFIRMED) is the only reach signal. Re-baseline in Phase 1 | Tech lead |
 | A20 | Rules in force **when an auction opens** govern bidding in that auction (increments, soft close, limits). Tax and fee rates in force **at the hammer** are frozen into the invoice (blueprint §8: "Invoices freeze the rates used at close") | PROPOSED | Rulebook versions are pinned per auction at opening ([02 §3](02-data-model.md#3-module-ownership-and-schemas)) | Product owner |
 | A21 | Spending-limit exposure is counted at the bidder's **proxy ceiling** (all-in), not the current price, because the engine may execute up to the ceiling without further consent | PROPOSED | Rulebook entry `limit.exposure_basis = proxy_ceiling`; alternative `current_price` | ABC Commercial |
-| A22 | No second-chance offer to the under-bidder after a default unless ABC enables it | PROPOSED | Rulebook `default.second_chance_offer.enabled = false`. The blueprint's reserve-not-met branch does include "offer to top bidder" | ABC Operations |
+| A22 | No second-chance offer to the under-bidder after a default unless ABC enables it | PROPOSED | Not offered after a default. The blueprint's reserve-not-met branch does include "offer to top bidder" (`reserve.offer_window_hours`) | ABC Operations |
+| A23 | ABC's bid-increment table and soft-close trigger window are not in the blueprint | **Decision needed** | Placeholder USD ladder (US$1 under US$50 up to US$250 above US$20,000) and a 10-minute trigger window, both tagged assumption in the rulebook. No ZiG ladder, so ZiG auctions cannot open | ABC Operations |
+| A24 | Delivery towns and prices: the town list conflicts (nine or seven, gap 6) and prices are not published | **Decision needed** | `delivery.rate_card` empty, so quotes are collection-only until operations publishes towns and prices | ABC Operations |
+| A25 | Timing of the default ladder | PROPOSED | Warning when the 48-hour window ends; deposit forfeit, relist fee and tier drop 24 hours later. The order comes from blueprint module 7 | ABC Operations / Risk |
+| A26 | Relist fee amount | **Decision needed** | 10 % of hammer, minimum US$10 (PROPOSED); the blueprint names the fee but no amount | ABC Commercial |
+| A27 | Minimum deposit per category | **Decision needed** | Hammer and Tongues' US$500 goods / US$3,000 vehicles as BENCHMARK placeholders | ABC Risk |
+| A28 | Minimum photo set for goods | PROPOSED | 4 photos per lot (vehicles 35, D2). Blueprint principle 6 gives no number | ABC Operations |
+| A29 | Rounding of fees and taxes | PROPOSED | Each line rounded half up to the cent; the total is the sum of the lines ([04 §4](04-fee-tax-engine.md#4-rounding)) | ABC Finance |
 
 ---
 
@@ -178,3 +185,4 @@ The product owner approved these resolutions on 2026-10-06.
 | Date | Change |
 |---|---|
 | 2026-10-06 | Register created. All defaults adopted by the product owner. Q1–Q10, A12, A15, A16 remain open with their owners |
+| 2026-10-06 | Phase 1: added A23–A29 found while transcribing the rule set ([03 §10](03-rulebook-service.md#10-the-initial-rule-set)). Every placeholder is tagged in `rulebook/initial-rule-set.json` and must be acknowledged before a rule set is published |

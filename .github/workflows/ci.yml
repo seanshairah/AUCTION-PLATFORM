@@ -1,0 +1,83 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  db-invariants:
+    name: Database invariants
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load schema and run invariant tests
+        run: db/tests/run.sh 2>&1 | tee test.log
+      - name: Check every test passed
+        run: |
+          grep -q "ALL INVARIANT TESTS PASSED" test.log
+          echo "$(grep -c 'NOTICE:  PASS' test.log) checks passed"
+
+  packages:
+    name: Typecheck and test packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm test
+
+  rulebook-load:
+    name: Load the rule set into the schema
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Generate SQL from the rule set (fails on validation errors)
+        run: pnpm -s rulebook:sql > rules.sql
+      - name: Load schema, seed and rule set as a draft version
+        run: |
+          createdb rulebook
+          psql -X -q -v ON_ERROR_STOP=1 -d rulebook -f db/schema.sql
+          psql -X -q -v ON_ERROR_STOP=1 -d rulebook -f db/seed.sql
+          psql -X -q -v ON_ERROR_STOP=1 -d rulebook -f rules.sql
+          psql -X -v ON_ERROR_STOP=1 -d rulebook -c "SELECT v.label, v.status, count(*) AS records FROM rulebook.rule_set_version v JOIN rulebook.rule_value r ON r.version_id = v.id GROUP BY 1, 2"

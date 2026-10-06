@@ -451,7 +451,7 @@ The reference engine implements this in-process over `auction.*` and `bidding.*`
 └── infra/              Terraform, Docker, CI workflows
 ```
 
-Only `docs/` and `db/` exist after Phase 0; the application scaffold starts in Phase 1.
+Phase 1 adds the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). The `apps/` come with the first API slices.
 
 ## 10. Environments and delivery
 
