@@ -1,12 +1,16 @@
 import { BiddingService } from '@abc/bidding';
 import { connectUrl, loadDotEnv, RulebookStore } from '@abc/db';
 import { RegistrationService } from '@abc/limits';
+import { LogisticsService } from '@abc/logistics';
 import { SettlementService } from '@abc/settlement';
+import { SupportService } from '@abc/support';
+import { VehicleService } from '@abc/vehicles';
 
 /**
  * The worker: closes lots whose (possibly extended) end time has passed, issues
  * invoices for auctions that have fully closed, and queues payment reminders.
- * Each step is idempotent, so running two workers or restarting one is safe.
+ * It also keeps collection slots generated, queues slot reminders and flags missed
+ * ticket and claim deadlines (deliverables 15 and 17). Each step is idempotent, so running two workers or restarting one is safe.
  * Usage: pnpm --filter @abc/api worker [--once]
  */
 loadDotEnv();
@@ -31,6 +35,22 @@ export async function tick(now = new Date()): Promise<void> {
     if (issued.length) console.log(`auction ${a.id}: ${issued.length} invoice(s) issued`);
   }
   await settlement.queueDueReminders(now);
+  await logisticsAndSupportTick(now);
+}
+
+// Deliverables 15 and 17: collection slots (hourly), slot reminders, ticket and claim deadline flags.
+const logistics = new LogisticsService(db, rulebook, settlement);
+const support = new SupportService(db, rulebook, new VehicleService(db, rulebook));
+let slotsEnsuredAt = 0;
+async function logisticsAndSupportTick(now: Date): Promise<void> {
+  if (now.getTime() - slotsEnsuredAt >= 3_600_000) {
+    const created = await logistics.ensureSlots(now);
+    if (created) console.log(`collection slots: ${created} created`);
+    slotsEnsuredAt = now.getTime();
+  }
+  await logistics.queueSlotReminders(now);
+  const flags = await support.flagSlaBreaches(now);
+  if (flags.firstResponse + flags.resolution + flags.disputes) console.log(`support: ${JSON.stringify(flags)} deadline flag(s) raised`);
 }
 
 const once = process.argv.includes('--once');

@@ -150,6 +150,25 @@ async function ensureAccounts(db: Db): Promise<Record<string, string>> {
   return ids;
 }
 
+/** DEMO partners (deliverable 15): a towing firm and a courier for each branch, labelled as demo data (A41). */
+const DEMO_PARTNERS: Array<{ kind: 'towing' | 'courier'; name: string; phone: string; branches: string[] }> = [
+  { kind: 'towing', name: 'Harare Tow and Recovery (demo)', phone: '+263770000401', branches: ['HRE'] },
+  { kind: 'towing', name: 'Bulawayo Breakdown Services (demo)', phone: '+263770000402', branches: ['BYO'] },
+  { kind: 'courier', name: 'Swift Parcels Harare (demo)', phone: '+263770000411', branches: ['HRE'] },
+  { kind: 'courier', name: 'Matabeleland Couriers (demo)', phone: '+263770000412', branches: ['BYO'] },
+];
+
+async function ensurePartners(db: Db): Promise<void> {
+  await db.tx({ ...SYSTEM, reason: 'demo seed: partners' }, async (c) => {
+    for (const p of DEMO_PARTNERS) {
+      await c.query(
+        `INSERT INTO logistics.partner (kind, name, phone_e164, branches, notes) VALUES ($1, $2, $3, $4, $5) ON CONFLICT (kind, name) DO NOTHING`,
+        [p.kind, p.name, p.phone, p.branches, 'DEMO ONLY: not a real partner (A41)'],
+      );
+    }
+  });
+}
+
 /** A published rule set the demo can price with: the real one if ABC has published, otherwise a labelled demo copy. */
 async function ensureRuleSet(db: Db, ids: Record<string, string>, notes: string[]): Promise<string> {
   const published = await db.query<{ id: string; label: string }>(
@@ -215,6 +234,7 @@ export async function seedDemo(
   const notes: string[] = [];
   const ids = await ensureAccounts(db);
   const ruleVersionId = await ensureRuleSet(db, ids, notes);
+  await ensurePartners(db);
 
   // A demo auction still 'scheduled' is left over from a seed run that failed part-way: cancel it.
   await db.tx({ ...SYSTEM, reason: 'demo seed: cancel a half-created demo auction' }, async (c) => {

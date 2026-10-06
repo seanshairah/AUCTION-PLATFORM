@@ -97,7 +97,7 @@ erDiagram
 | `registration` | Registration | Per-auction admission with limit snapshot; approved limit overrides |
 | `settlement` | Close and settlement | Invoices, lines, default ladder |
 | `logistics` | Logistics, Vehicles | Collections, QR pass, slots, title cases |
-| `support` | Support and disputes | Disputes and evidence (tickets: deliverable 17) |
+| `support` | Support and disputes | Disputes, evidence and tickets ([17](17-support-disputes.md)); payout holds and clawbacks live in `payout` |
 | `comms` | Communications | Templates, messages, preferences |
 
 **Rule versions** (A20). An auction pins `rule_version_id` when it opens. Bidding in that auction (increments, soft close, limit formula) follows that version. Its invoices use the **same pinned version** for fees, plus the tax rates in force **at the hammer**; each tax line references the exact `tax_rate` row used. Changing a rule mid-auction therefore never changes what a bidder was shown or billed (A20, corrected in Phase 3).
@@ -200,6 +200,7 @@ stateDiagram-v2
   paid --> refunded
   title_hold --> refunded
   released --> refunded : claim window
+  paid_out --> refunded : upheld claim after payout (A54)
   refunded --> listed
   refunded --> withdrawn
 
@@ -217,7 +218,7 @@ stateDiagram-v2
 
 **Enforced by the database** (tested in `db/tests/invariants.sql`):
 
-- A lot is created only in `draft`, and moves only along listed transitions. `paid_out` and `withdrawn` are terminal.
+- A lot is created only in `draft`, and moves only along listed transitions. `withdrawn` is terminal; `paid_out` is terminal except for an upheld full-refund claim (A54), and a lot enters `refunded` only through one ([17 §6](17-support-disputes.md#6-refunds-payouts-and-clawbacks)).
 - A vehicle cannot go from `paid` to `released`; it must pass `title_hold`. A non-vehicle cannot enter `title_hold`.
 - A vehicle cannot enter `released` unless its `logistics.title_case` is `complete`. A title case cannot be `complete` unless ZRP, ZIMRA and CVR steps are all `done`, and a step cannot be `done` without evidence.
 - The vehicle flag must match the lot's category (composite foreign key) and is fixed once the lot leaves `draft`.

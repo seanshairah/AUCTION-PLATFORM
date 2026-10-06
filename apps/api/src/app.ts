@@ -8,6 +8,7 @@ import { RegistrationService } from '@abc/limits';
 import { AccountController } from './bidding/account.controller';
 import { BidDesk } from './bidding/bid-desk';
 import { jsonReplacer } from './http';
+import { logisticsAndSupport } from './logistics/module';
 import { CatalogueReader } from './lots/catalogue-reader';
 import { LotsController } from './lots/lots.controller';
 import { readCookie, SESSION_COOKIE, verifySession, type RequestWithAccount } from './session';
@@ -35,15 +36,17 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
   const registrations = new RegistrationService(rulebook);
   const bidding = new BiddingService(db, rulebook, registrations);
   const catalogue = new CatalogueReader(db, rulebook);
+  const logisticsSupport = logisticsAndSupport(db, rulebook);
   return {
     module: ApiModule,
-    controllers: [LotsController, AccountController, SystemController],
+    controllers: [LotsController, AccountController, SystemController, ...logisticsSupport.controllers],
     providers: [
       { provide: CONFIG, useValue: config },
       { provide: DB, useValue: db },
       { provide: RULEBOOK, useValue: rulebook },
       { provide: CATALOGUE, useValue: catalogue },
       { provide: BID_DESK, useValue: new BidDesk(db, rulebook, registrations, bidding, catalogue) },
+      ...logisticsSupport.providers,
     ],
   };
 }

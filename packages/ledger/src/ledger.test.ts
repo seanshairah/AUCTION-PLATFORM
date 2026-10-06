@@ -3,7 +3,11 @@ import { createTestDatabase, DB_TESTS_ENABLED, SYSTEM, type TestDatabase } from 
 import {
   activeHolds,
   balance,
+  clawbackRecovery,
   createHold,
+  deliveryCharge,
+  fullRefundAndReturn,
+  storageFee,
   forfeitHold,
   forfeitHoldById,
   invoiceCredit,
@@ -73,6 +77,31 @@ describe('posting recipes (pure)', () => {
     const issued = invoiceIssued({ invoiceId: 'i1', buyerId: BUYER, currency: 'USD', lines: [{ type: 'hammer', amountMinor: 500n, sellerId: SELLER }] });
     expect(invoiceCredit(issued, 'i1').lines.map((l) => l.amountMinor)).toEqual([-500n, 500n]);
     expect(reversal(issued, 'j1', 'test').reversesJournalId).toBe('j1');
+  });
+
+  it('logistics and dispute recipes balance and hit the right accounts (deliverables 15 and 17)', () => {
+    const full = fullRefundAndReturn({
+      disputeId: 'd1', buyerId: BUYER, sellerId: SELLER, currency: 'USD', hammerMinor: 26_000n, commissionMinor: 2_600n,
+      otherLines: [{ type: 'purchasers_levy', amountMinor: 3_900n }, { type: 'vat', amountMinor: 4_030n }], fundedBy: 'seller',
+    });
+    expect(full.lines.map((l) => [l.account.purpose, l.account.sub ?? '', l.amountMinor])).toEqual([
+      ['seller_payable', '', 23_400n],
+      ['commission_income', '', 2_600n],
+      ['tax_payable', 'purchasers_levy', 3_900n],
+      ['tax_payable', 'vat', 4_030n],
+      ['wallet_available', '', -33_930n],
+    ]);
+    const fronted = fullRefundAndReturn({ disputeId: 'd2', buyerId: BUYER, sellerId: SELLER, currency: 'USD', hammerMinor: 1_000n, commissionMinor: 0n, otherLines: [], fundedBy: 'platform' });
+    expect(fronted.lines.map((l) => [l.account.purpose, l.amountMinor])).toEqual([['suspense', 1_000n], ['wallet_available', -1_000n]]);
+    const specs = [
+      full,
+      fronted,
+      clawbackRecovery({ clawbackId: 'c1', payoutId: 'p1', sellerId: SELLER, currency: 'USD', amountMinor: 500n }),
+      storageFee({ collectionId: 'c1', buyerId: BUYER, currency: 'USD', amountMinor: 520n, days: 2 }),
+      deliveryCharge({ deliveryId: 'dl1', buyerId: BUYER, currency: 'USD', lines: [{ type: 'delivery', amountMinor: 1_000n }, { type: 'vat', amountMinor: 155n }] }),
+    ];
+    for (const s of specs) expect(sum(s)).toBe(0n);
+    expect(() => fullRefundAndReturn({ disputeId: 'd3', buyerId: BUYER, sellerId: SELLER, currency: 'USD', hammerMinor: 100n, commissionMinor: 200n, otherLines: [], fundedBy: 'seller' })).toThrow(RangeError);
   });
 
   it('refuses zero, negative and one-sided journals', () => {

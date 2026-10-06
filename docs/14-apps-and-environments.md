@@ -67,6 +67,7 @@ Refusals:
 | Migration | Change |
 |---|---|
 | `0001_vehicle_body_and_drive` | `catalogue.vehicle.body_style` and `drive` (with checks) for the dashboard filters; index on make and model. `VehicleService.setDetails` now records fuel, transmission, colour, body style and drive |
+| `0003_logistics_support` | Slot bookings, storage charges, deliveries and their events ([15](15-logistics.md)); claim decisions, tickets and messages, payout holds and clawbacks ([17](17-support-disputes.md)); journal kinds `storage_fee`, `delivery_charge`, `clawback`; lot transition `paid_out → refunded` |
 
 ## 5. Demo data
 

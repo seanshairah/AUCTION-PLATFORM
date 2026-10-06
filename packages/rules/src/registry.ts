@@ -698,6 +698,22 @@ export const RULES = {
     schema: basisPoints,
     describe: (v) => `After the free period, storage costs ${percent(v)} of the hammer price per day.`,
   }),
+  'logistics.collection_slot': rule({
+    title: 'Collection appointments',
+    section: 'Delivery and storage',
+    owner: 'operations',
+    schema: z.object({ minutes: positiveInt, capacity: positiveInt, bookAheadDays: positiveInt }).strict(),
+    describe: (v) =>
+      `Book a ${v.minutes}-minute collection slot in the app, up to ${v.bookAheadDays} days ahead, during branch opening hours. Up to ${v.capacity} buyers are served per slot.`,
+  }),
+  'logistics.slot_reminder_hours': rule({
+    title: 'Collection reminders',
+    section: 'Delivery and storage',
+    owner: 'operations',
+    schema: z.array(positiveInt),
+    describe: (v) =>
+      v.length === 0 ? '' : `We remind you ${v.map(hours).join(' and ')} before your collection slot.`,
+  }),
 
   // Lots and vehicles ------------------------------------------------------------
   'catalogue.min_photos': rule({
@@ -861,6 +877,43 @@ export const RULES = {
     owner: 'operations',
     schema: positiveInt,
     describe: (v) => `Every claim gets a named owner and a reply within ${hours(v)}.`,
+  }),
+  'dispute.decision_target_hours': rule({
+    title: 'Decision time for claims',
+    section: 'Disputes',
+    owner: 'operations',
+    schema: positiveInt,
+    describe: (v) => `We decide every claim within ${hours(v)}. The seller is not paid for the lot until we have decided.`,
+  }),
+  'dispute.refund_second_approver_threshold': rule({
+    title: 'Second approval for refunds',
+    section: 'Disputes',
+    owner: 'finance',
+    public: false,
+    schema: moneyByCurrency,
+    describe: (v) =>
+      `A refund above ${describeMoneyByCurrency(v)} needs a second staff member's approval. Where no amount is set for a currency, every refund in it needs one.`,
+  }),
+  'support.ticket_targets': rule({
+    title: 'Support response times',
+    section: 'Disputes',
+    owner: 'operations',
+    schema: z.record(
+      z.enum(['urgent', 'high', 'normal', 'low']),
+      z.object({ firstResponseHours: positiveInt, resolutionHours: positiveInt }).strict(),
+    ),
+    describe: (v) =>
+      'Every support request gets a named owner. We reply first within ' +
+      (['urgent', 'high', 'normal', 'low'] as const)
+        .filter((p) => v[p])
+        .map((p) => `${hours(v[p]!.firstResponseHours)} (${p})`)
+        .join(', ') +
+      ', and aim to resolve it within ' +
+      (['urgent', 'high', 'normal', 'low'] as const)
+        .filter((p) => v[p])
+        .map((p) => `${hours(v[p]!.resolutionHours)} (${p})`)
+        .join(', ') +
+      '.',
   }),
 } as const;
 
