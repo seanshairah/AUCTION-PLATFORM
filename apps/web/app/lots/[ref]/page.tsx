@@ -1,4 +1,4 @@
-import { CheckCircleIcon, ChevronLeftIcon, ChevronRightIcon, ClipboardDocumentCheckIcon, ClockIcon, DocumentTextIcon, ExclamationTriangleIcon, MapPinIcon, MinusCircleIcon, PhoneIcon, Squares2X2Icon, TruckIcon, XCircleIcon } from '@heroicons/react/20/solid';
+import { CheckCircleIcon, ChevronLeftIcon, ChevronRightIcon, ClipboardDocumentCheckIcon, ClockIcon, DocumentTextIcon, ExclamationTriangleIcon, EyeIcon, MapPinIcon, MinusCircleIcon, PhoneIcon, Squares2X2Icon, TruckIcon, XCircleIcon } from '@heroicons/react/20/solid';
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -7,6 +7,7 @@ import { Gallery, type GalleryPhoto } from '@/components/Gallery';
 import { LiveRefresher } from '@/components/LiveRefresher';
 import { ReserveStatus } from '@/components/LotCards';
 import { MakeMark } from '@/components/Marks';
+import { Viewings } from '@/components/Viewings';
 import { api, apiOrNull } from '@/lib/api';
 import { BODY_LABEL, km, shortDateTime, titleCase } from '@/lib/format';
 import { demoCredits, demoPhotoCount, demoSet } from '@/lib/media';
@@ -87,6 +88,7 @@ export default async function LotPage({ params }: Props) {
             {lot.inspection && <a href="#inspection"><ClipboardDocumentCheckIcon /> Inspection</a>}
             <a href="#history"><ClockIcon /> Bid history</a>
             <a href="#description"><DocumentTextIcon /> Description</a>
+            {lot.isVehicle && !lot.closed && <a href="#viewing"><EyeIcon /> Viewing</a>}
             <a href="#collection"><TruckIcon /> Collection</a>
           </nav>
         </div>
@@ -198,6 +200,13 @@ export default async function LotPage({ params }: Props) {
             <div className="panel-head"><h2><DocumentTextIcon /> Description</h2><ReserveStatus status={lot.reserveStatus} /></div>
             <div className="panel-body"><p className="ink-2" style={{ maxWidth: '70ch' }}>{lot.description}</p></div>
           </section>
+
+          {lot.isVehicle && !lot.closed && (
+            <section className="panel" id="viewing" style={{ marginTop: 16 }}>
+              <div className="panel-head"><h2><EyeIcon /> Book a viewing</h2><span className="micro">30 minutes · bring your ID</span></div>
+              <div className="panel-body"><Viewings lotRef={lot.ref} signedIn={Boolean(me)} branch={lot.branch.name.replace('ABC Auctions ', '')} /></div>
+            </section>
+          )}
 
           <section className="panel" id="collection" style={{ marginTop: 16 }}>
             <div className="panel-head"><h2><TruckIcon /> Collection</h2><span className="micro">{lot.branch.name}</span></div>

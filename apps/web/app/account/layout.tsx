@@ -19,6 +19,9 @@ export default async function AccountLayout({ children }: { children: React.Reac
               { href: '/account/bids', label: 'My bids', icon: 'bids', count: outbid || open, urgent: outbid > 0 },
               { href: '/account/wallet', label: 'Wallet', icon: 'wallet' },
             ] },
+            { title: 'Selling', links: [
+              { href: '/account/selling', label: 'Seller portal', icon: 'selling' },
+            ] },
           ]}
         />
         <div className="foot">

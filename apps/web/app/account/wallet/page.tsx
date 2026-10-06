@@ -1,4 +1,5 @@
-import { BanknotesIcon, LockClosedIcon, PlusIcon } from '@heroicons/react/20/solid';
+import { BanknotesIcon, LockClosedIcon } from '@heroicons/react/20/solid';
+import { TopUp } from '@/components/TopUp';
 import { PayMarks } from '@/components/Marks';
 import { apiOrNull } from '@/lib/api';
 import { shortDateTime } from '@/lib/format';
@@ -19,7 +20,7 @@ export default async function WalletPage() {
           <h1>Wallet</h1>
           <p>One balance per currency, never mixed. Deposits are held, not spent, and come back when the auction settles.</p>
         </div>
-        <button className="btn" disabled title="Mobile-money top-ups open with the payments launch (Q7)"><PlusIcon /> Top up</button>
+        <div className="topup-anchor"><TopUp /></div>
       </div>
       <div className="kpis" style={{ ['--n' as string]: 4, marginBottom: 16 }}>
         <div className="kpi"><span className="micro">US$ available</span><span className="v">{usd?.available.text ?? 'US$0.00'}</span></div>
@@ -29,7 +30,7 @@ export default async function WalletPage() {
       </div>
       <div className="notice info" style={{ marginBottom: 16 }}>
         <BanknotesIcon />
-        <span>EcoCash, OneMoney, InnBucks, ZimSwitch and card top-ups open with the payments launch. Until then, top up with cash at the Harare or Bulawayo counter and keep your receipt number.</span>
+        <span>Top up by EcoCash, OneMoney, InnBucks, ZimSwitch or card, or with cash at the Harare or Bulawayo counter. Money is added only once the payment is confirmed; this demo uses a simulated gateway.</span>
       </div>
       <div className="nest" style={{ marginBottom: 16 }}>
         <div className="nest-head"><LockClosedIcon /><h3>Held deposits</h3><span className="badge">{wallet.holds.length}</span></div>

@@ -32,6 +32,18 @@ Money always travels as `{ minor: "1910000", currency: "USD", text: "US$19,100.0
 | `POST /auctions/:id/join` `{depositMinor?}` | required | One-tap registration, holding the deposit from the wallet |
 | `GET /me`, `/me/bids`, `/me/wallet` | required | Account; lots bid on (leading, outbid, won, not won); balances, held deposits and payments |
 | `GET /rules` | — | The public rulebook in plain language from the active published rule set |
+| `GET /auctions` | — | Open and scheduled auctions with branch, first and last close, lot and bid counts, cover photo (home and docket pages) |
+| `GET /lots/:ref/live` | optional | The figures an open lot page polls every 5 seconds: price, bids, end time, reserve status, whether the viewer leads |
+| `GET /lots/:ref/viewings`, `POST /viewings/:slot/book`, `POST /viewings/bookings/:id/cancel` | optional / required | Bookable viewing slots with remaining places (capacity enforced by the database, deliverable 14 §5) |
+| `POST /me/top-ups`, `GET /me/top-ups/:id` | required | Wallet top-up through the gateway router; credited only after the gateway confirms (docs/09). Idempotent by client key |
+| `POST /webhooks/payments/:gateway` | gateway | Callback: verified, recorded, confirmed by a status check, credited once |
+| `POST /dev/fake-gateway/payments/:id/approve` | demo only | Plays the payer's phone for the in-memory gateway (development and staging, never production) |
+| `POST /me/invoices/:id/pay` | required | One-tap payment from the wallet; the auction deposit counts towards it; returns the QR gate pass token once |
+| `GET /seller/overview`, `GET /seller/vocabulary` | required | Seller portal: lots against the seller's own reserve, consignments, payouts and totals |
+| `POST /seller/consignments`, `GET /seller/consignments/:id`, `POST /seller/consignments/:id/lots` | required | Consign and add draft lots (owner only) |
+| `GET /seller/consignments/:id/note`, `POST /seller/consignments/:id/sign` | required | The note exactly as it will be signed and its SHA-256; signing with a stale hash is refused |
+| `GET /seller/valuation`, `GET /seller/proceeds` | required | Valuation range from past sales; the published commission calculator |
+| `POST /seller/bulk` | required | Institutional CSV upload: all or nothing, idempotent per batch |
 | `GET /session/demo-accounts`, `POST /session/demo`, `POST /session/sign-out` | — | Demo sign-in (§3) |
 
 Requests are validated with zod; a bad query is a 400 with a readable message.
@@ -93,8 +105,20 @@ Removing demo data. The ledger and audit log are append-only, so rows cannot be 
 | Wallet | `/wallet` | Per-currency available and held, held deposits, payments in |
 | Fees and rules | `/rules` | The public rulebook |
 | Sign in | `/sign-in` | Demo picker when enabled, otherwise an honest "not available yet" |
+| Home | `/` | Cinematic event hero for the next auction with a segmented countdown, event navigation, "closing next" rail, bento (all-in price, inspection, automatic bidding, one wallet), seller band |
+| Seller portal | `/account/selling` | Lots against the seller's reserve, consignments, payouts; new consignment; add lots with valuation and "you receive" calculator; read and e-sign the note; bulk upload |
+| Viewing | on the lot page | Book or cancel a 30-minute slot |
+| Top up | `/account/wallet` | Amount, method (EcoCash, OneMoney, InnBucks, ZimSwitch, card) and phone; waits for the gateway's confirmation |
+| Sell, Help, Photo credits | `/sell`, `/help`, `/credits` | Consignor page; plain answers; licences for the demo photos |
 
 The sidebar lists only screens that exist. The current app's "Soon" screens are a blueprint finding (gap 5), so nothing here is a placeholder. The layout collapses to a top bar and single column on phones.
+
+### Design system
+
+ABC's own brand: navy `#030234` (lifted to `#0e0d2b` for ink) and orange `#FB932A` as the single accent, with navy text on orange.
+- **Type:** IBM Plex Sans for UI, IBM Plex Sans Condensed for display and IBM Plex Mono for figures, labels and clocks, self-hosted through `@fontsource`. Weights stop at 600.
+- **Components:** Heroicons solid, chevrons, underlined links, button groups, counter badges with a background, hairlines, and nested cards in the account area.
+- **Photos:** demo photos are openly licensed Wikimedia Commons images of the same models, credited on each lot and at `/credits`. They are served by the web app's `/media` route; production serves media from `MEDIA_BASE_URL`.
 
 ## 7. Environments
 

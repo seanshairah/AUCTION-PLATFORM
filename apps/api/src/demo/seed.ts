@@ -4,8 +4,10 @@ import { checkListingReadiness } from '@abc/catalogue';
 import { readRuleSetDocument, RulebookStore, SYSTEM, type Actor, type Db } from '@abc/db';
 import { lotPricing, RegistrationService } from '@abc/limits';
 import { PaymentService } from '@abc/payments';
+import { SettlementService } from '@abc/settlement';
 import { quoteLot } from '@abc/quote';
 import type { RuleRecord } from '@abc/rules';
+import { SellerService } from '@abc/seller';
 import { CHECKLISTS, VehicleService, type InspectionInput } from '@abc/vehicles';
 
 /**
@@ -110,6 +112,28 @@ export interface DemoSeedResult {
   lots: number;
   bids: number;
   notes: string[];
+}
+
+/** Branch intake ends with the seller signing the note at the counter: done here through the real service. */
+async function signAtBranch(db: Db, rulebook: RulebookStore, sellerId: string, lotId: string): Promise<void> {
+  const r = await db.query<{ consignment_id: string }>('SELECT consignment_id FROM catalogue.lot WHERE id = $1', [lotId]);
+  const consignmentId = r.rows[0]!.consignment_id;
+  const service = new SellerService(db, rulebook);
+  const note = await service.previewNote(consignmentId);
+  const out = await service.sign({ type: 'account', id: sellerId, name: 'Borrowdale Motors', reason: 'demo seed: signed at the branch counter' }, consignmentId, {
+    shownSha256: note.sha256, signatureReference: `branch-counter:${consignmentId}`, noteObjectKey: `consignment-notes/${consignmentId}/${note.sha256}.txt`,
+  });
+  if (!out.signed) throw new Error(`Demo consignment ${consignmentId} did not sign: ${out.reason}`);
+}
+
+function nextWeekdays(from: Date, n: number): Date[] {
+  const out: Date[] = [];
+  const d = new Date(from.getTime());
+  while (out.length < n) {
+    d.setUTCDate(d.getUTCDate() + 1);
+    if (d.getUTCDay() !== 0 && d.getUTCDay() !== 6) out.push(new Date(d.getTime()));
+  }
+  return out;
 }
 
 function dollars(n: number): bigint {
@@ -250,8 +274,8 @@ export async function seedDemo(
       `SELECT coalesce(sum(available_minor), 0)::bigint AS available FROM ledger.v_wallet WHERE account_id = $1 AND currency = 'USD'`,
       [ids[b]],
     );
-    if ((w.rows[0]?.available ?? 0n) < dollars(9_000)) {
-      await payments.recordBranchCash(staff, { cashierId: ids.staff!, branch: 'HRE', accountId: ids[b]!, currency: 'USD', amountMinor: dollars(10_000), receiptNumber: `DEMO-${stamp}-${b}` });
+    if ((w.rows[0]?.available ?? 0n) < dollars(12_000)) {
+      await payments.recordBranchCash(staff, { cashierId: ids.staff!, branch: 'HRE', accountId: ids[b]!, currency: 'USD', amountMinor: dollars(15_000), receiptNumber: `DEMO-${stamp}-${b}` });
     }
   }
 
@@ -320,6 +344,11 @@ export async function seedDemo(
     const { reportId } = await vehicles.submitInspection(staff, lotId, inspectionFor(v, chassis, engine));
     const pub = await vehicles.publishInspection(staff, reportId);
     if (!pub.published) throw new Error(`Demo inspection for ${title} did not publish: ${pub.issues.map((x) => x.code).join(', ')}`);
+    await signAtBranch(db, rulebook, ids.seller!, lotId);
+    // Viewing slots on the next two weekdays, 10:00 Harare time (08:00 UTC), four 30-minute slots each.
+    for (const day of nextWeekdays(now, 2)) {
+      await vehicles.createViewingSlots(staff, { branch: 'HRE', lotId, firstStart: new Date(Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate(), 8, 0)), count: 4 });
+    }
 
     const readiness = checkListingReadiness({
       lot: { title, description, categoryPath: (await lotPricing(db, lotId)).categoryPath, itemState: 'used', condition: 'working', conditionNotes: v.note?.note ?? null,
@@ -368,5 +397,89 @@ export async function seedDemo(
     else notes.push(`Demo bid by ${who} on lot ${lotIndex + 1} was not accepted: ${out.reason}`);
   }
 
+  await seedClosedAuction(db, { ids, staff, ruleVersionId, now, code: `DEMO-BYO-${stamp}`, rulebook, registrations, bidding, vehicles, notes });
+
   return { auctionId, auctionCode: code, created: true, ruleVersionId, accounts: ids, lots: VEHICLES.length, bids, notes };
+}
+
+/**
+ * A small auction that has already closed, so purchases, one-tap payment, the gate
+ * pass and the vehicle title tracker have something real to show: Tendai wins a
+ * Toyota Aqua at Bulawayo against Rudo, and the invoice is issued at the close.
+ */
+async function seedClosedAuction(
+  db: Db,
+  p: {
+    ids: Record<string, string>; staff: Actor & { type: 'staff' }; ruleVersionId: string; now: Date; code: string;
+    rulebook: RulebookStore; registrations: RegistrationService; bidding: BiddingService; vehicles: VehicleService; notes: string[];
+  },
+): Promise<void> {
+  const { ids, staff, now } = p;
+  const auctionId = randomUUID();
+  const lotId = randomUUID();
+  const auctionLotId = randomUUID();
+  const endsAt = new Date(now.getTime() + 60_000);
+  const v = { make: 'Toyota', model: 'Aqua S', year: 2016, km: 102_300 };
+  const title = `${v.year} ${v.make} ${v.model}`;
+  const chassis = chassisFor(p.code, 1);
+  await db.tx(staff, async (c) => {
+    await c.query(
+      `INSERT INTO auction.auction (id, code, title, format, branch_code, status, opens_at, first_close_at, deposit_required, created_by)
+       VALUES ($1, $2, 'Vehicles: Bulawayo (demo, closed)', 'timed_online', 'BYO', 'scheduled', $3, $4, true, $5)`,
+      [auctionId, p.code, new Date(now.getTime() - 3 * HOUR), endsAt, ids.staff],
+    );
+    const consignment = randomUUID();
+    await c.query(`INSERT INTO seller.consignment (id, seller_account_id, consignment_type, intake_channel, branch_code) VALUES ($1, $2, 'commission', 'branch', 'BYO')`, [consignment, ids.seller]);
+    await c.query(
+      `INSERT INTO catalogue.lot (id, lot_ref, consignment_id, seller_account_id, category_code, is_vehicle, title, description,
+                                  item_state, condition, location_branch, settlement_currency, tax_class, starting_bid_minor)
+       VALUES ($1, $2, $3, $4, 'vehicles_used_zw', true, $5, $6, 'used', 'working', 'BYO', 'USD', 'vehicle_used_zw', $7)`,
+      [lotId, `${p.code}-1`, consignment, ids.seller, title, `${title}, white, automatic, hybrid, ${v.km.toLocaleString('en-US')} km. Zimbabwe-registered. Inspected on the standard checklist.`, dollars(2_500).toString()],
+    );
+    const params: unknown[] = [lotId];
+    const media: string[] = [];
+    for (let k = 0; k < 38; k++) {
+      params.push(photoRole(k), `demo/${p.code}-1/v/toyota-aqua/photo-${String(k + 1).padStart(2, '0')}.jpg`, k);
+      media.push(`($1, 'photo', $${params.length - 2}, $${params.length - 1}, $${params.length})`);
+    }
+    params.push(`demo/${p.code}-1/v/toyota-aqua/walkaround.mp4`);
+    media.push(`($1, 'video', 'walkaround', $${params.length}, 100)`);
+    await c.query(`INSERT INTO catalogue.lot_media (lot_id, kind, role, object_key, sort) VALUES ${media.join(', ')}`, params);
+  });
+  await p.vehicles.setDetails(staff, lotId, { make: v.make, model: v.model, year: v.year, chassisNumber: chassis, engineNumber: `ENG${chassis.slice(4, 12)}`, registrationNumber: 'AFK 4417',
+    zimbabweRegistered: true, odometerKm: v.km, documentsStatus: 'complete', fuel: 'hybrid', transmission: 'automatic', colour: 'White', bodyStyle: 'hatchback', drive: '2wd' });
+  const { reportId } = await p.vehicles.submitInspection(staff, lotId, inspectionFor({ photo: 'toyota-aqua', make: v.make, model: v.model, year: v.year, odometerKm: v.km, zimbabweRegistered: true, startingBid: 2_500, reserve: null,
+    body: 'hatchback', transmission: 'automatic', fuel: 'hybrid', drive: '2wd', colour: 'White' }, chassis, `ENG${chassis.slice(4, 12)}`));
+  await p.vehicles.publishInspection(staff, reportId);
+  await signAtBranch(db, p.rulebook, ids.seller!, lotId);
+  await db.tx(staff, async (c) => {
+    await c.query(`UPDATE catalogue.lot SET state = 'listed' WHERE id = $1`, [lotId]);
+    await c.query(
+      `INSERT INTO auction.auction_lot (id, auction_id, lot_id, currency, lot_number, starting_bid_minor, scheduled_end_at, current_end_at)
+       VALUES ($1, $2, $3, 'USD', 1, $4, $5, $5)`,
+      [auctionLotId, auctionId, lotId, dollars(2_500).toString(), endsAt],
+    );
+    await c.query('UPDATE catalogue.lot SET current_auction_lot_id = $2 WHERE id = $1', [lotId, auctionLotId]);
+  });
+  await p.bidding.openAuction({ ...staff, reason: 'demo seed: open closed demo auction' }, auctionId, now);
+  for (const b of ['tendai', 'rudo'] as const) {
+    await db.tx({ type: 'account', id: ids[b]!, name: b, reason: 'demo seed: join auction' }, (c) => p.registrations.join(c, { accountId: ids[b]!, auctionId, deposit: { USD: dollars(3_000) } }));
+  }
+  // Bids placed well before the end, so no soft-close extension applies.
+  const snapshot = await p.rulebook.snapshot(p.ruleVersionId);
+  const taxRates = await p.rulebook.taxRates();
+  const pricing = await lotPricing(db, lotId);
+  for (const [who, max, minutesBefore] of [['rudo', 2_800, 50], ['tendai', 3_000, 40]] as const) {
+    const at = new Date(endsAt.getTime() - minutesBefore * MINUTE);
+    const quote = quoteLot({ lot: pricing, hammerMinor: dollars(max), snapshot, taxRates, at });
+    await p.bidding.placeBid({ type: 'account', id: ids[who]!, name: who, reason: 'demo seed: bid' }, {
+      accountId: ids[who]!, auctionLotId, maxMinor: dollars(max), clientRequestId: randomUUID(), quotedTotalMinor: quote.totalMinor,
+      quotedRuleVersionId: p.ruleVersionId, channel: 'web', at,
+    });
+  }
+  const closeAt = new Date(endsAt.getTime() + 1_000);
+  await p.bidding.closeDueLots(closeAt);
+  const settlement = new SettlementService(db, p.rulebook, { gatePassSecret: process.env.GATE_PASS_SECRET ?? 'dev-only-gate-pass-secret' });
+  const issued = await settlement.settleClosedAuction(auctionId, closeAt);
+  p.notes.push(`Closed demo auction ${p.code}: ${issued.length} invoice(s) issued.`);
 }

@@ -4,7 +4,7 @@ import { ChevronRightIcon } from '@heroicons/react/20/solid';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-export function DemoSignIn({ accounts, next }: { accounts: Array<{ id: string; name: string }>; next: string }) {
+export function DemoSignIn({ accounts, next }: { accounts: Array<{ id: string; name: string; kind?: string }>; next: string }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   return (
@@ -18,7 +18,7 @@ export function DemoSignIn({ accounts, next }: { accounts: Array<{ id: string; n
             setBusy(a.id);
             const res = await fetch('/api/session/demo', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ accountId: a.id }) });
             if (res.ok) {
-              router.push(next);
+              router.push(a.kind === 'seller' && next === '/auctions' ? '/account/selling' : next);
               router.refresh();
             } else setBusy(null);
           }}
@@ -26,7 +26,7 @@ export function DemoSignIn({ accounts, next }: { accounts: Array<{ id: string; n
           style={{ width: '100%', gap: 12, padding: '16px 18px', border: 0, borderTop: i ? '1px solid var(--line-soft)' : 0, background: 'var(--surface)', cursor: 'pointer', textAlign: 'left' }}
         >
           <span className="avatar">{a.name.slice(0, 1)}</span>
-          <span className="grow"><span className="w600">{a.name}</span><br /><span className="small muted">{busy === a.id ? 'Signing in…' : 'Demo bidder · fully verified'}</span></span>
+          <span className="grow"><span className="w600">{a.name}</span><br /><span className="small muted">{busy === a.id ? 'Signing in…' : a.kind === 'seller' ? 'Demo seller · see the seller portal' : 'Demo bidder · fully verified'}</span></span>
           <ChevronRightIcon width={18} style={{ color: 'var(--muted)' }} />
         </button>
       ))}

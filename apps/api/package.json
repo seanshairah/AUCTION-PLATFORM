@@ -22,6 +22,7 @@
     "@abc/payments": "workspace:*",
     "@abc/quote": "workspace:*",
     "@abc/rules": "workspace:*",
+    "@abc/seller": "workspace:*",
     "@abc/settlement": "workspace:*",
     "@abc/vehicles": "workspace:*",
     "@nestjs/common": "^12.1.2",

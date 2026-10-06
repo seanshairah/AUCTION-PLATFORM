@@ -1,18 +1,18 @@
 'use client';
 
-import { BellIcon, ChatBubbleLeftRightIcon, AdjustmentsHorizontalIcon, HandRaisedIcon, ShoppingBagIcon, WalletIcon } from '@heroicons/react/20/solid';
+import { AdjustmentsHorizontalIcon, BellIcon, BuildingStorefrontIcon, ChatBubbleLeftRightIcon, HandRaisedIcon, ShoppingBagIcon, WalletIcon } from '@heroicons/react/20/solid';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 export interface AccountLink {
   href: string;
   label: string;
-  icon: 'bids' | 'purchases' | 'wallet' | 'notifications' | 'preferences' | 'support';
+  icon: 'bids' | 'purchases' | 'wallet' | 'notifications' | 'preferences' | 'support' | 'selling';
   count?: number;
   urgent?: boolean;
 }
 
-const ICONS = { bids: HandRaisedIcon, purchases: ShoppingBagIcon, wallet: WalletIcon, notifications: BellIcon, preferences: AdjustmentsHorizontalIcon, support: ChatBubbleLeftRightIcon };
+const ICONS = { bids: HandRaisedIcon, purchases: ShoppingBagIcon, wallet: WalletIcon, notifications: BellIcon, preferences: AdjustmentsHorizontalIcon, support: ChatBubbleLeftRightIcon, selling: BuildingStorefrontIcon };
 
 export function AccountNav({ sections }: { sections: Array<{ title: string; links: AccountLink[] }> }) {
   const path = usePathname();

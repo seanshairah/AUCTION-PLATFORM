@@ -506,3 +506,10 @@ img { display: block; max-width: 100%; }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; }
 }
+
+/* top-up popover */
+.topup-anchor { position: relative; }
+.topup-pop { position: absolute; right: 0; top: calc(100% + 8px); width: 380px; z-index: 30; box-shadow: var(--float); }
+@media (max-width: 520px) { .topup-pop { position: fixed; left: 16px; right: 16px; top: 80px; width: auto; } }
+.split { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 24px; }
+@media (max-width: 860px) { .split { grid-template-columns: 1fr; } }

@@ -30,13 +30,12 @@ export class SystemController {
   @Get('session/demo-accounts')
   async demoAccounts() {
     if (!this.config.demoSignIn) throw new ForbiddenException({ code: 'demo_sign_in_disabled', message: 'Demo sign-in is not enabled here.' });
-    const r = await this.db.query<{ id: string; display_name: string }>(
-      `SELECT a.id, a.display_name FROM identity.account a
+    const r = await this.db.query<{ id: string; display_name: string; account_type: string }>(
+      `SELECT a.id, a.display_name, a.account_type FROM identity.account a
         WHERE a.email LIKE '%@demo.abc-auctions.test' AND NOT EXISTS (SELECT 1 FROM identity.staff_role s WHERE s.account_id = a.id)
-          AND a.account_type = 'individual'
-        ORDER BY a.display_name`,
+        ORDER BY a.account_type DESC, a.display_name`,
     );
-    return r.rows.map((a) => ({ id: a.id, name: a.display_name }));
+    return r.rows.map((a) => ({ id: a.id, name: a.display_name, kind: a.account_type === 'organisation' ? 'seller' : 'bidder' }));
   }
 
   /** Development and staging only (A42): sign in as a demo bidder. */

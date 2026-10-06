@@ -18,9 +18,9 @@ describe('sessions', () => {
   });
 
   it('refuses demo sign-in and weak secrets in production', () => {
-    expect(() => configFromEnv({ APP_ENV: 'production', SESSION_SECRET: 'x'.repeat(40), DEMO_SIGN_IN: '1' })).toThrow(/DEMO_SIGN_IN/);
+    expect(() => configFromEnv({ APP_ENV: 'production', SESSION_SECRET: 'x'.repeat(40), GATE_PASS_SECRET: 'g', DEMO_SIGN_IN: '1' })).toThrow(/DEMO_SIGN_IN/);
     expect(() => configFromEnv({ APP_ENV: 'production', SESSION_SECRET: 'short' })).toThrow(/SESSION_SECRET/);
-    expect(configFromEnv({ APP_ENV: 'production', SESSION_SECRET: 'x'.repeat(40) }).secureCookies).toBe(true);
+    expect(configFromEnv({ APP_ENV: 'production', SESSION_SECRET: 'x'.repeat(40), GATE_PASS_SECRET: 'g' }).secureCookies).toBe(true);
   });
 });
 
@@ -50,7 +50,7 @@ describe.skipIf(!DB_TESTS_ENABLED)('API against PostgreSQL with the demo data', 
     expect(seed.created).toBe(true);
     expect(seed.lots).toBe(10);
     expect(seed.bids).toBe(10);
-    expect(seed.notes).toEqual([expect.stringContaining('-demo')]);
+    expect(seed.notes).toEqual(expect.arrayContaining([expect.stringContaining('-demo'), expect.stringContaining('1 invoice(s) issued')]));
   });
 
   it('refuses to seed in production', async () => {
@@ -111,8 +111,8 @@ describe.skipIf(!DB_TESTS_ENABLED)('API against PostgreSQL with the demo data', 
   it('wallet shows available and held money from the ledger', async () => {
     const cookie = await signIn('tendai');
     const res = await request(app.getHttpServer()).get('/me/wallet').set('Cookie', cookie).expect(200);
-    expect(res.body.balances).toEqual([{ currency: 'USD', available: expect.objectContaining({ text: 'US$2,000.00' }), held: expect.objectContaining({ text: 'US$8,000.00' }) }]);
-    expect(res.body.holds[0].description).toBe('Deposit: Vehicles: Harare (demo)');
+    expect(res.body.balances).toEqual([{ currency: 'USD', available: expect.objectContaining({ text: 'US$4,000.00' }), held: expect.objectContaining({ text: 'US$11,000.00' }) }]);
+    expect(res.body.holds.map((h: { description: string }) => h.description).sort()).toEqual(['Deposit: Vehicles: Bulawayo (demo, closed)', 'Deposit: Vehicles: Harare (demo)']);
   });
 
   it('serves the public rulebook from the published rule set', async () => {
