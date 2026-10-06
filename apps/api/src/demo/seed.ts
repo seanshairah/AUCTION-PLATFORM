@@ -168,6 +168,17 @@ async function ensureAccounts(db: Db): Promise<Record<string, string>> {
     });
     ids[p.key] = id;
   }
+  // Contact consent as sign-up records it, so the preference centre and messages work for demo people.
+  for (const p of PEOPLE) {
+    await db.tx({ ...SYSTEM, reason: 'demo seed: contact consent' }, async (c) => {
+      for (const channel of ['whatsapp', 'sms', 'email']) {
+        await c.query(
+          `INSERT INTO identity.contact_consent (account_id, channel, granted, source) VALUES ($1, $2, true, 'demo_seed') ON CONFLICT (account_id, channel) DO NOTHING`,
+          [ids[p.key], channel],
+        );
+      }
+    });
+  }
   // Each staff role is granted by the other demo staff member (a role is never self-granted).
   for (const p of PEOPLE.filter((x) => x.staffRole)) {
     const grantor = p.key === 'staff' ? ids.approver : ids.staff;

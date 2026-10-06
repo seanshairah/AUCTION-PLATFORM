@@ -99,7 +99,7 @@ describe.skipIf(!DB_TESTS_ENABLED)('communications and one-time-code sign-in thr
     const cookie = String(login.headers['set-cookie']).split(';')[0]!;
     await request(server()).get('/me/preferences').expect(401);
     const view = await request(server()).get('/me/preferences').set('Cookie', cookie).expect(200);
-    expect(view.body.categories.find((c: { category: string }) => c.category === 'marketing').channels.email).toEqual({ enabled: false, consented: false });
+    expect(view.body.categories.find((c: { category: string }) => c.category === 'marketing').channels.email).toEqual({ enabled: false, consented: true }); // demo people consent to email; marketing stays off by default
     const off = ['whatsapp', 'push', 'sms', 'email'].map((channel) => ({ category: 'payments', channel, enabled: false }));
     expect((await request(server()).put('/me/preferences').set('Cookie', cookie).send({ changes: off }).expect(400)).body.code).toBe('needs_a_channel');
     const ok = await request(server()).put('/me/preferences').set('Cookie', cookie).send({ changes: [{ category: 'outbid', channel: 'sms', enabled: false }] }).expect(200);

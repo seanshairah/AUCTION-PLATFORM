@@ -1,4 +1,5 @@
 import { InformationCircleIcon } from '@heroicons/react/20/solid';
+import { OtpSignIn } from '@/components/account/OtpSignIn';
 import { DemoSignIn } from '@/components/DemoSignIn';
 import { apiOrNull } from '@/lib/api';
 
@@ -10,16 +11,20 @@ export default async function SignInPage({ searchParams }: { searchParams: Promi
   const safeNext = next?.startsWith('/') && !next.startsWith('//') ? next : '/auctions';
   return (
     <section className="section">
-      <div className="wrap" style={{ maxWidth: 760 }}>
-        <div className="micro">Your account</div>
-        <h1 className="display d-lg" style={{ margin: '8px 0 16px' }}>Sign in</h1>
-        {accounts ? (
+      <div className="wrap split" style={{ maxWidth: 1080, alignItems: 'start' }}>
+        <div className="stack">
+          <div>
+            <div className="micro">Your account</div>
+            <h1 className="display d-lg" style={{ margin: '8px 0 8px' }}>Sign in or register</h1>
+            <p className="lead">One code to your phone or email. New here? The same code creates your account.</p>
+          </div>
+          <OtpSignIn next={safeNext} demo={Boolean(accounts)} />
+        </div>
+        {accounts && (
           <div className="stack">
-            <div className="notice"><InformationCircleIcon /><span><strong className="w600">Demo environment.</strong> Choose a demo bidder or the demo seller. Bidders have a wallet, deposits held and bids placed; Tendai has an unpaid invoice from a closed auction.</span></div>
+            <div className="notice"><InformationCircleIcon /><span><strong className="w600">Demo environment.</strong> Or act as a demo person: bidders have wallets, deposits and bids; Tendai has a paid invoice; Borrowdale Motors sells.</span></div>
             <DemoSignIn accounts={accounts} next={safeNext} />
           </div>
-        ) : (
-          <div className="notice neutral"><InformationCircleIcon /><span>Sign-in with a one-time code by WhatsApp, SMS or email is not enabled in this environment.</span></div>
         )}
       </div>
     </section>

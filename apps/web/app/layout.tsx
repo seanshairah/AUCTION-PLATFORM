@@ -25,7 +25,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   const [wallet, unread] = me
     ? await Promise.all([
         apiOrNull<Wallet>('/me/wallet').catch(() => null),
-        apiOrNull<{ unread?: number }>('/me/notifications/unread-count').catch(() => null),
+        apiOrNull<{ unread?: number }>('/me/notifications?limit=1').catch(() => null),
       ])
     : [null, null];
   return (

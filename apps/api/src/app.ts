@@ -13,6 +13,7 @@ import { MoneyController } from './money/money.controller';
 import { SellerController } from './seller/seller.controller';
 import { ViewingsController } from './lots/viewings.controller';
 import { ADMIN_CONTROLLERS, ADMIN_PROVIDERS } from './admin';
+import { DevController } from './dev.controller';
 import { AccountController } from './bidding/account.controller';
 import { COMMS_CONTROLLERS, commsProviders } from './comms';
 import { BidDesk } from './bidding/bid-desk';
@@ -64,7 +65,7 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
   const logisticsSupport = logisticsAndSupport(db, rulebook, { ...process.env, GATE_PASS_SECRET: config.gatePassSecret });
   return {
     module: ApiModule,
-    controllers: [LotsController, AuctionsController, AccountController, SystemController, MoneyController, SellerController, ViewingsController, ...logisticsSupport.controllers, ...ADMIN_CONTROLLERS, ...COMMS_CONTROLLERS],
+    controllers: [LotsController, AuctionsController, AccountController, SystemController, MoneyController, SellerController, ViewingsController, ...logisticsSupport.controllers, ...ADMIN_CONTROLLERS, ...COMMS_CONTROLLERS, DevController],
     providers: [
       { provide: CONFIG, useValue: config },
       { provide: DB, useValue: db },
