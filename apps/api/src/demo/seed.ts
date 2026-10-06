@@ -4,6 +4,7 @@ import { checkListingReadiness } from '@abc/catalogue';
 import { readRuleSetDocument, RulebookStore, SYSTEM, type Actor, type Db } from '@abc/db';
 import { lotPricing, RegistrationService } from '@abc/limits';
 import { PaymentService } from '@abc/payments';
+import { LogisticsService } from '@abc/logistics';
 import { SettlementService } from '@abc/settlement';
 import { quoteLot } from '@abc/quote';
 import type { RuleRecord } from '@abc/rules';
@@ -418,6 +419,8 @@ export async function seedDemo(
   }
 
   await seedClosedAuction(db, { ids, staff, ruleVersionId, now, code: `DEMO-BYO-${stamp}`, rulebook, registrations, bidding, vehicles, notes });
+  // Collection slots from branch opening hours (the worker keeps them topped up hourly).
+  await new LogisticsService(db, rulebook, new SettlementService(db, rulebook, { gatePassSecret: process.env.GATE_PASS_SECRET ?? 'dev-only-gate-pass-secret' })).ensureSlots(now);
 
   return { auctionId, auctionCode: code, created: true, ruleVersionId, accounts: ids, lots: VEHICLES.length, bids, notes };
 }
