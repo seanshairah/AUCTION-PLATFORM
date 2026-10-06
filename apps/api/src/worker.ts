@@ -2,10 +2,13 @@ import { BiddingService } from '@abc/bidding';
 import { connectUrl, loadDotEnv, RulebookStore } from '@abc/db';
 import { RegistrationService } from '@abc/limits';
 import { SettlementService } from '@abc/settlement';
+import { VehicleService } from '@abc/vehicles';
+import { buildCommsRuntime } from './comms/runtime';
 
 /**
  * The worker: closes lots whose (possibly extended) end time has passed, issues
- * invoices for auctions that have fully closed, and queues payment reminders.
+ * invoices for auctions that have fully closed, queues payment reminders, ending-soon
+ * and overdue-title alerts, and dispatches messages (docs/16).
  * Each step is idempotent, so running two workers or restarting one is safe.
  * Usage: pnpm --filter @abc/api worker [--once]
  */
@@ -16,6 +19,8 @@ const bidding = new BiddingService(db, rulebook, new RegistrationService(ruleboo
 const gatePassSecret = process.env.GATE_PASS_SECRET ?? (process.env.APP_ENV === 'production' ? '' : 'dev-only-gate-pass-secret');
 if (!gatePassSecret) throw new Error('GATE_PASS_SECRET is required in production.');
 const settlement = new SettlementService(db, rulebook, { gatePassSecret });
+const vehicles = new VehicleService(db, rulebook);
+const comms = buildCommsRuntime(db, rulebook);
 const intervalMs = Number(process.env.WORKER_INTERVAL_MS ?? 5_000);
 
 export async function tick(now = new Date()): Promise<void> {
@@ -31,6 +36,11 @@ export async function tick(now = new Date()): Promise<void> {
     if (issued.length) console.log(`auction ${a.id}: ${issued.length} invoice(s) issued`);
   }
   await settlement.queueDueReminders(now);
+  await vehicles.alertOverdueTitleSteps(now);
+  await comms.endingSoon.queue(now);
+  await comms.intake.resumeSubmissions(now);
+  const sent = await comms.dispatcher.run(now);
+  if (sent.queued || sent.sent || sent.failed) console.log(`messages: ${sent.queued} queued, ${sent.sent} sent, ${sent.failed} failed, ${sent.fallbacks} fallbacks`);
 }
 
 const once = process.argv.includes('--once');

@@ -6,6 +6,7 @@ import { BiddingService } from '@abc/bidding';
 import { RulebookStore, type Db } from '@abc/db';
 import { RegistrationService } from '@abc/limits';
 import { AccountController } from './bidding/account.controller';
+import { COMMS_CONTROLLERS, commsProviders } from './comms';
 import { BidDesk } from './bidding/bid-desk';
 import { jsonReplacer } from './http';
 import { CatalogueReader } from './lots/catalogue-reader';
@@ -37,19 +38,21 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
   const catalogue = new CatalogueReader(db, rulebook);
   return {
     module: ApiModule,
-    controllers: [LotsController, AccountController, SystemController],
+    controllers: [LotsController, AccountController, SystemController, ...COMMS_CONTROLLERS],
     providers: [
       { provide: CONFIG, useValue: config },
       { provide: DB, useValue: db },
       { provide: RULEBOOK, useValue: rulebook },
       { provide: CATALOGUE, useValue: catalogue },
       { provide: BID_DESK, useValue: new BidDesk(db, rulebook, registrations, bidding, catalogue) },
+      ...commsProviders(db, rulebook),
     ],
   };
 }
 
 export async function createApp(db: Db, config: ApiConfig): Promise<INestApplication> {
-  const app = await NestFactory.create(apiModule(db, config), { logger: ['error', 'warn'] });
+  // rawBody: provider webhooks are verified against the exact bytes received (docs/16).
+  const app = await NestFactory.create(apiModule(db, config), { logger: ['error', 'warn'], rawBody: true });
   const express = app.getHttpAdapter().getInstance();
   express.set('json replacer', jsonReplacer);
   express.disable('x-powered-by');

@@ -108,7 +108,8 @@ INSERT INTO registration.registration (id, account_id, auction_id, status, decid
    'approved', 'system', now(), '{"USD": {"limit_minor": 10000}}');
 
 INSERT INTO comms.template (key, version, channel, category, body, status) VALUES
-  ('outbid', 1, 'whatsapp', 'alert', 'You have been outbid on {{lot}}.', 'approved');
+  ('outbid', 1, 'whatsapp', 'alert', 'You have been outbid on {{lot}}.', 'approved')
+ON CONFLICT DO NOTHING;                         -- seeded by db/seed.sql since deliverable 16
 
 -- -----------------------------------------------------------------------------
 -- R1: one double-entry ledger
@@ -558,6 +559,137 @@ SELECT test.expect_error('An institution''s own lot number is unique per seller 
   $$UPDATE catalogue.lot SET external_ref = 'ZIMRA-0001' WHERE lot_ref = 'HRE-TEST-2'$$,
   $$UPDATE catalogue.lot SET external_ref = 'ZIMRA-0001' WHERE lot_ref = 'HRE-TEST-1'$$],
   'duplicate key');
+
+-- -----------------------------------------------------------------------------
+-- Deliverable 16: communications and sign-in by one-time code
+-- -----------------------------------------------------------------------------
+
+SELECT test.expect_error('An approved template never changes (a new version does)', ARRAY[
+  $$UPDATE comms.template SET body = body || ' Changed.' WHERE key = 'won' AND version = 1 AND channel = 'sms'$$],
+  'cannot change; add a new version');
+
+SELECT test.expect_error('An approved template is never deleted', ARRAY[
+  $$DELETE FROM comms.template WHERE key = 'won' AND version = 1 AND channel = 'sms'$$],
+  'never deleted');
+
+SELECT test.expect_error('An SMS template uses only GSM-7 characters (one 160-character segment)', ARRAY[
+  $$INSERT INTO comms.template (key, version, channel, category, body, status) VALUES ('curly', 1, 'sms', 'alert', 'It’s ready', 'draft')$$],
+  'template_sms_gsm7');
+
+SELECT test.expect_error('An email template has a subject', ARRAY[
+  $$INSERT INTO comms.template (key, version, channel, category, body, status) VALUES ('nosubject', 1, 'email', 'alert', 'Body', 'draft')$$],
+  'template_email_subject');
+
+SELECT test.expect_ok('Messages: one queued by WhatsApp, then marked sent with its provider id', ARRAY[
+  $$INSERT INTO comms.message (id, message_key, recipient_account_id, channel, template_key, template_version, locale, params)
+    VALUES ('00000000-0000-0000-0000-00000000c161', 'won:inv-test', '00000000-0000-0000-0000-0000000000b1', 'whatsapp', 'won', 1, 'en-ZW', '{}')$$,
+  $$UPDATE comms.message SET status = 'sent', sent_at = now(), provider = 'whatsapp', provider_message_id = 'wamid.T1'
+     WHERE id = '00000000-0000-0000-0000-00000000c161'$$,
+  $$UPDATE comms.message SET status = 'delivered', delivered_at = now() WHERE id = '00000000-0000-0000-0000-00000000c161'$$]);
+
+SELECT test.expect_error('A message is not marked sent without the provider''s id', ARRAY[
+  $$INSERT INTO comms.message (message_key, recipient_account_id, channel, template_key, template_version, locale, status, sent_at)
+    VALUES ('won:inv-test-2', '00000000-0000-0000-0000-0000000000b1', 'sms', 'won', 1, 'en-ZW', 'sent', now())$$],
+  'message_sent_has_provider');
+
+SELECT test.expect_error('Message status only moves forward (delivered cannot go back to sent)', ARRAY[
+  $$UPDATE comms.message SET status = 'sent' WHERE id = '00000000-0000-0000-0000-00000000c161'$$],
+  'cannot go from delivered to sent');
+
+SELECT test.expect_error('A message''s recipient and channel never change after queueing', ARRAY[
+  $$UPDATE comms.message SET channel = 'sms' WHERE id = '00000000-0000-0000-0000-00000000c161'$$],
+  'cannot change');
+
+SELECT test.expect_error('Messages are never deleted (a record of what people were told)', ARRAY[
+  $$DELETE FROM comms.message WHERE id = '00000000-0000-0000-0000-00000000c161'$$],
+  'DELETE is not allowed');
+
+SELECT test.expect_error('A provider message id names one message', ARRAY[
+  $$INSERT INTO comms.message (message_key, recipient_account_id, channel, template_key, template_version, locale, status, sent_at, provider, provider_message_id)
+    VALUES ('won:other', '00000000-0000-0000-0000-0000000000b2', 'whatsapp', 'won', 1, 'en-ZW', 'sent', now(), 'whatsapp', 'wamid.T1')$$],
+  'duplicate key');
+
+SELECT test.expect_error('A fallback is the same message to the same person on another channel', ARRAY[
+  $$INSERT INTO comms.message (message_key, recipient_account_id, channel, template_key, template_version, locale, fallback_of)
+    VALUES ('won:something-else', '00000000-0000-0000-0000-0000000000b1', 'sms', 'won', 1, 'en-ZW', '00000000-0000-0000-0000-00000000c161')$$],
+  'same message to the same person on another channel');
+
+SELECT test.expect_ok('A fallback on the next channel is linked to the first message', ARRAY[
+  $$INSERT INTO comms.message (message_key, recipient_account_id, channel, template_key, template_version, locale, fallback_of)
+    VALUES ('won:inv-test', '00000000-0000-0000-0000-0000000000b1', 'push', 'won', 1, 'en-ZW', '00000000-0000-0000-0000-00000000c161')$$]);
+
+SELECT test.expect_error('A message needs an account or an address', ARRAY[
+  $$INSERT INTO comms.message (message_key, channel, template_key, template_version, locale)
+    VALUES ('otp:x:1', 'sms', 'otp_code', 1, 'en-ZW')$$],
+  'message_recipient');
+
+SELECT test.expect_error('R4 also for messages to an address with no account (a sign-up code)', ARRAY[
+  $$INSERT INTO comms.message (message_key, recipient_address, channel, template_key, template_version, locale) VALUES ('otp:y:1', '+263771111111', 'sms', 'otp_code', 1, 'en-ZW')$$,
+  $$INSERT INTO comms.message (message_key, recipient_address, channel, template_key, template_version, locale) VALUES ('otp:y:1', '+263771111111', 'sms', 'otp_code', 1, 'en-ZW')$$],
+  'duplicate key');
+
+SELECT test.expect_error('Preference categories are a fixed list', ARRAY[
+  $$INSERT INTO comms.preference (account_id, category, channel, enabled) VALUES ('00000000-0000-0000-0000-0000000000b1', 'anything', 'sms', false)$$],
+  'preference_category');
+
+SELECT test.expect_error('Messages about money keep at least one channel', ARRAY[
+  $$INSERT INTO comms.preference (account_id, category, channel, enabled) VALUES
+      ('00000000-0000-0000-0000-0000000000b1', 'payments', 'whatsapp', false), ('00000000-0000-0000-0000-0000000000b1', 'payments', 'sms', false),
+      ('00000000-0000-0000-0000-0000000000b1', 'payments', 'push', false), ('00000000-0000-0000-0000-0000000000b1', 'payments', 'email', false)$$],
+  'need at least one channel');
+
+SELECT test.expect_ok('Alerts and marketing can be switched off on every channel', ARRAY[
+  $$INSERT INTO comms.preference (account_id, category, channel, enabled) VALUES
+      ('00000000-0000-0000-0000-0000000000b1', 'outbid', 'whatsapp', false), ('00000000-0000-0000-0000-0000000000b1', 'outbid', 'sms', false),
+      ('00000000-0000-0000-0000-0000000000b1', 'outbid', 'push', false), ('00000000-0000-0000-0000-0000000000b1', 'outbid', 'email', false)$$]);
+
+SELECT test.expect_ok('A one-time code challenge stores a salt and an HMAC, never the code', ARRAY[
+  $$INSERT INTO identity.otp_challenge (id, purpose, destination_type, destination, code_salt, code_hmac, code_length, max_attempts, max_sends,
+                                        last_sent_at, created_at, expires_at)
+    VALUES ('00000000-0000-0000-0000-00000000d161', 'sign_in', 'phone', '+263771234500', decode(repeat('ab', 16), 'hex'), decode(repeat('cd', 32), 'hex'),
+            6, 5, 3, now(), now(), now() + interval '10 minutes')$$]);
+
+SELECT test.expect_error('Only one live code per phone number or email address', ARRAY[
+  $$INSERT INTO identity.otp_challenge (purpose, destination_type, destination, code_salt, code_hmac, code_length, max_attempts, max_sends, last_sent_at, created_at, expires_at)
+    VALUES ('sign_in', 'phone', '+263771234500', decode(repeat('ab', 16), 'hex'), decode(repeat('cd', 32), 'hex'), 6, 5, 3, now(), now(), now() + interval '10 minutes')$$],
+  'otp_challenge_pending_uniq');
+
+SELECT test.expect_error('A code''s expiry and HMAC cannot be changed', ARRAY[
+  $$UPDATE identity.otp_challenge SET expires_at = expires_at + interval '1 day' WHERE id = '00000000-0000-0000-0000-00000000d161'$$],
+  'immutable');
+
+SELECT test.expect_error('Wrong-code attempts never go down', ARRAY[
+  $$UPDATE identity.otp_challenge SET attempts = 2 WHERE id = '00000000-0000-0000-0000-00000000d161'$$,
+  $$UPDATE identity.otp_challenge SET attempts = 1 WHERE id = '00000000-0000-0000-0000-00000000d161'$$],
+  'never go down');
+
+SELECT test.expect_error('A code cannot be verified after it expires', ARRAY[
+  $$UPDATE identity.otp_challenge SET status = 'verified', verified_at = now() + interval '1 hour' WHERE id = '00000000-0000-0000-0000-00000000d161'$$],
+  'check constraint');
+
+SELECT test.expect_error('A used code is final', ARRAY[
+  $$UPDATE identity.otp_challenge SET status = 'verified', verified_at = now() WHERE id = '00000000-0000-0000-0000-00000000d161'$$,
+  $$UPDATE identity.otp_challenge SET status = 'pending', verified_at = NULL WHERE id = '00000000-0000-0000-0000-00000000d161'$$],
+  'cannot change');
+
+SELECT test.expect_error('A code for an email address must be a lower-case address', ARRAY[
+  $$INSERT INTO identity.otp_challenge (purpose, destination_type, destination, code_salt, code_hmac, code_length, max_attempts, max_sends, last_sent_at, created_at, expires_at)
+    VALUES ('sign_in', 'email', 'Farai@Example.test', decode(repeat('ab', 16), 'hex'), decode(repeat('cd', 32), 'hex'), 6, 5, 3, now(), now(), now() + interval '10 minutes')$$],
+  'check constraint');
+
+SELECT test.expect_error('Each inbound provider message is recorded once and never edited', ARRAY[
+  $$INSERT INTO comms.inbound_message (provider, provider_message_id, from_address, kind) VALUES ('whatsapp', 'wamid.IN', '+263771234567', 'text')$$,
+  $$UPDATE comms.inbound_message SET kind = 'image' WHERE provider_message_id = 'wamid.IN'$$],
+  'append-only');
+
+SELECT test.expect_error('One open chat conversation per number', ARRAY[
+  $$INSERT INTO comms.conversation (channel, address, account_id, flow, step, state) VALUES ('whatsapp', '+263770000003', '00000000-0000-0000-0000-0000000000a1', 'seller_intake', 'category', '{}')$$,
+  $$INSERT INTO comms.conversation (channel, address, account_id, flow, step, state) VALUES ('whatsapp', '+263770000003', '00000000-0000-0000-0000-0000000000a1', 'seller_intake', 'category', '{}')$$],
+  'conversation_open_uniq');
+
+SELECT test.expect_error('A chat consignment is done only when its consignment and lot exist', ARRAY[
+  $$INSERT INTO comms.conversation (channel, address, account_id, flow, step, state, ended_at) VALUES ('whatsapp', '+263770000004', '00000000-0000-0000-0000-0000000000a1', 'seller_intake', 'done', '{}', now())$$],
+  'check constraint');
 
 SELECT 'ALL INVARIANT TESTS PASSED' AS result;
 

@@ -194,10 +194,48 @@ const ALERT_LABEL: Record<string, string> = {
   outbid: 'outbid',
   ending_soon: 'ending soon',
   won: 'you won',
+  lost: 'bidding ended',
   invoice: 'invoice',
   payment_reminder: 'payment reminder',
+  default: 'overdue invoice',
   collection_ready: 'ready to collect',
+  payout: 'seller payout',
+  registration: 'auction registration',
+  consignment: 'consignment received',
+  staff_task: 'staff task',
+  otp: 'sign-in code',
 };
+
+/** Message types with a channel fallback order (rule comms.fallback, docs/16 §5). */
+export const COMMS_POLICIES = [
+  'outbid', 'ending_soon', 'won', 'lost', 'invoice', 'payment_reminder', 'default', 'collection_ready',
+  'payout', 'registration', 'consignment', 'staff_task', 'otp',
+] as const;
+export type CommsPolicy = (typeof COMMS_POLICIES)[number];
+
+/** What people can switch on or off per channel (comms.preference.category, docs/16 §6). */
+export const PREFERENCE_CATEGORIES = [
+  'outbid', 'ending_soon', 'auction_results', 'payments', 'collection', 'selling', 'account', 'staff_tasks', 'marketing',
+] as const;
+export type PreferenceCategory = (typeof PREFERENCE_CATEGORIES)[number];
+/** Categories that cannot be switched off completely: at least one channel always stays on. */
+export const TRANSACTIONAL_PREFERENCE_CATEGORIES: readonly PreferenceCategory[] = [
+  'auction_results', 'payments', 'collection', 'selling', 'account', 'staff_tasks',
+];
+export const PREFERENCE_CHANNELS = ['whatsapp', 'push', 'sms', 'email'] as const;
+export const PREFERENCE_LABELS: Record<PreferenceCategory, string> = {
+  outbid: 'outbid alerts',
+  ending_soon: 'ending-soon alerts',
+  auction_results: 'auction results',
+  payments: 'invoices and payments',
+  collection: 'collection',
+  selling: 'selling and payouts',
+  account: 'account and registration',
+  staff_tasks: 'staff tasks',
+  marketing: 'news and offers',
+};
+
+const clockTime = z.string().regex(/^([01][0-9]|2[0-3]):[0-5][0-9]$/);
 
 function increments(bands: IncrementBands, c: Currency): string {
   return bands
@@ -793,16 +831,20 @@ export const RULES = {
     title: 'How we reach you',
     section: 'Messages',
     owner: 'product',
-    schema: z.record(
-      z.enum(['outbid', 'ending_soon', 'won', 'invoice', 'payment_reminder', 'collection_ready']),
-      z.object({ channels: z.array(channel).min(1), fallbackAfterSeconds: positiveInt }).strict(),
+    schema: z.partialRecord(
+      z.enum(COMMS_POLICIES),
+      z
+        .object({ channels: z.array(channel).min(1), fallbackAfterSeconds: positiveInt })
+        .strict()
+        .refine((p) => new Set(p.channels).size === p.channels.length, 'a channel appears twice'),
     ),
     describe: (v) =>
       'We send alerts on WhatsApp first. If a message is not delivered, we try the next way of reaching you: ' +
       Object.entries(v)
-        .map(([k, p]) => `${ALERT_LABEL[k] ?? k} (${p.channels.map((c) => CHANNEL_LABEL[c] ?? c).join(' → ')})`)
+        .filter(([k]) => k !== 'staff_task')
+        .map(([k, p]) => `${ALERT_LABEL[k] ?? k} (${p!.channels.map((c) => CHANNEL_LABEL[c] ?? c).join(' → ')})`)
         .join('; ') +
-      '. We also email you a copy for your records.',
+      '. We also email you a copy of messages about your bids, money and goods for your records.',
   }),
   'comms.ending_soon_minutes': rule({
     title: '"Ending soon" alert',
@@ -810,6 +852,106 @@ export const RULES = {
     owner: 'product',
     schema: positiveInt,
     describe: (v) => `For lots you watch or bid on, we alert you ${v} minutes before they close.`,
+  }),
+
+  'comms.quiet_hours': rule({
+    title: 'Quiet hours',
+    section: 'Messages',
+    owner: 'product',
+    schema: z
+      .object({ start: clockTime, end: clockTime, timeZone: z.string().min(3) })
+      .strict()
+      .refine((q) => q.start !== q.end, 'start and end must differ'),
+    describe: (v) =>
+      `Between ${v.start} and ${v.end} (${v.timeZone.replace(/^.*\//, '').replace(/_/g, ' ')} time) we hold WhatsApp messages, SMS and app notifications until ${v.end}. ` +
+      `Sign-in codes are never held, and nor are alerts for lots that close before ${v.end}. Messages in the app and emails are not held.`,
+  }),
+  'comms.retry': rule({
+    title: 'Message retries',
+    section: 'Messages',
+    owner: 'product',
+    public: false,
+    schema: z
+      .object({
+        sendAttempts: positiveInt,
+        backoffSeconds: z.array(positiveInt).min(1),
+        outboxAttempts: positiveInt,
+        leaseSeconds: positiveInt,
+      })
+      .strict(),
+    describe: (v) =>
+      `A message that fails for a temporary reason is tried up to ${v.sendAttempts} times (waiting ${v.backoffSeconds.map((s) => duration(s)).join(', then ')}), then the next channel is tried. ` +
+      `An event that cannot be turned into messages is retried ${v.outboxAttempts} times, then left for staff to investigate.`,
+  }),
+  'comms.preference_defaults': rule({
+    title: 'Message settings for new accounts',
+    section: 'Messages',
+    owner: 'product',
+    schema: z
+      .record(z.enum(PREFERENCE_CATEGORIES), z.array(z.enum(PREFERENCE_CHANNELS)))
+      .refine((v) => PREFERENCE_CATEGORIES.every((c) => v[c] !== undefined), 'every category needs a default')
+      .refine((v) => (v.marketing ?? []).length === 0, 'news and offers stay off until the person opts in')
+      .refine((v) => TRANSACTIONAL_PREFERENCE_CATEGORIES.every((c) => (v[c] ?? []).length > 0), 'messages about your bids, money and goods need at least one channel'),
+    describe: (v) =>
+      'Until you change them in your settings, we send: ' +
+      PREFERENCE_CATEGORIES.filter((c) => c !== 'staff_tasks' && (v[c] ?? []).length > 0)
+        .map((c) => `${PREFERENCE_LABELS[c]} by ${(v[c] ?? []).map((ch) => CHANNEL_LABEL[ch] ?? ch).join(', ')}`)
+        .join('; ') +
+      '. News and offers are off unless you switch them on. Messages about your bids, money and goods always keep at least one channel.',
+  }),
+
+  // Sign-in (identity) ------------------------------------------------------------------
+  'identity.otp_code_length': rule({
+    title: 'Sign-in code length',
+    section: 'Security and overrides',
+    owner: 'risk',
+    public: false,
+    schema: z.number().int().min(4).max(10),
+    describe: (v) => `Sign-in codes have ${v} digits.`,
+  }),
+  'identity.otp_expiry_seconds': rule({
+    title: 'Sign-in codes expire',
+    section: 'Security and overrides',
+    owner: 'risk',
+    schema: z.number().int().min(60).max(3600),
+    describe: (v) => `A sign-in code works once and expires after ${duration(v)}.`,
+  }),
+  'identity.otp_max_attempts': rule({
+    title: 'Wrong sign-in codes',
+    section: 'Security and overrides',
+    owner: 'risk',
+    schema: z.number().int().min(1).max(10),
+    describe: (v) => `After ${v} wrong tries a code stops working and you need a new one.`,
+  }),
+  'identity.otp_resend_cooldown_seconds': rule({
+    title: 'Sending a code again',
+    section: 'Security and overrides',
+    owner: 'risk',
+    schema: positiveInt,
+    describe: (v) => `You can ask for the code again after ${duration(v)}.`,
+  }),
+  'identity.otp_max_sends': rule({
+    title: 'Code resends',
+    section: 'Security and overrides',
+    owner: 'risk',
+    public: false,
+    schema: z.number().int().min(1).max(10),
+    describe: (v) => `The same code is sent at most ${v} times; after that a new code is needed.`,
+  }),
+  'identity.otp_rate_limits': rule({
+    title: 'Sign-in code limits',
+    section: 'Security and overrides',
+    owner: 'risk',
+    public: false,
+    schema: z
+      .object({
+        perContact: z.object({ max: positiveInt, windowMinutes: positiveInt }).strict(),
+        perIp: z.object({ max: positiveInt, windowMinutes: positiveInt }).strict(),
+      })
+      .strict(),
+    describe: (v) =>
+      `At most ${v.perContact.max} new codes per phone number or email address in ${duration(v.perContact.windowMinutes * 60)}, ` +
+      `and ${v.perIp.max} per network address in ${duration(v.perIp.windowMinutes * 60)}.`,
   }),
 
   // Security and overrides --------------------------------------------------------------

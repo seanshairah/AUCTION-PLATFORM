@@ -68,6 +68,7 @@ CREATE TABLE core.outbox (
   attempts       integer NOT NULL DEFAULT 0
 );
 CREATE INDEX outbox_pending_idx ON core.outbox (id) WHERE dispatched_at IS NULL;
+CREATE INDEX outbox_topic_aggregate_idx ON core.outbox (topic, aggregate_id);
 
 -- API-level idempotency (R4): a repeated request returns the stored response.
 CREATE TABLE core.idempotency_key (
@@ -435,6 +436,72 @@ CREATE TABLE identity.contact_consent (
 
 CREATE TRIGGER contact_consent_audit AFTER INSERT OR UPDATE ON identity.contact_consent
   FOR EACH ROW EXECUTE FUNCTION audit.log_state_change('granted', 'account_id');
+
+-- One-time sign-in codes (docs/16 §9).
+-- The code is never stored. code_hmac verifies a typed code; code_salt lets the sender derive the
+-- same code again with the server secret (docs/16 §9). Both are useless without that secret.
+CREATE TABLE identity.otp_challenge (
+  id               uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  purpose          text NOT NULL CHECK (purpose IN ('sign_in', 'add_contact')),
+  destination_type text NOT NULL CHECK (destination_type IN ('phone', 'email')),
+  destination      text NOT NULL,                -- E.164 phone or lower-case email
+  account_id       uuid REFERENCES identity.account (id),
+  code_salt        bytea NOT NULL CHECK (octet_length(code_salt) >= 16),
+  code_hmac        bytea NOT NULL CHECK (octet_length(code_hmac) = 32),
+  code_length      integer NOT NULL CHECK (code_length BETWEEN 4 AND 10),
+  ip_hmac          bytea,
+  status           text NOT NULL DEFAULT 'pending'
+                     CHECK (status IN ('pending', 'verified', 'expired', 'locked', 'superseded')),
+  attempts         integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  max_attempts     integer NOT NULL CHECK (max_attempts > 0),
+  send_count       integer NOT NULL DEFAULT 1 CHECK (send_count >= 1),
+  max_sends        integer NOT NULL CHECK (max_sends > 0),
+  last_sent_at     timestamptz NOT NULL,
+  created_at       timestamptz NOT NULL,
+  expires_at       timestamptz NOT NULL,
+  verified_at      timestamptz,
+  CHECK (expires_at > created_at),
+  CHECK (attempts <= max_attempts),
+  CHECK (send_count <= max_sends),
+  CHECK ((status = 'verified') = (verified_at IS NOT NULL)),
+  CHECK (verified_at IS NULL OR verified_at <= expires_at),
+  CHECK (status <> 'locked' OR attempts = max_attempts),
+  CHECK (destination_type <> 'phone' OR destination ~ '^\+[1-9][0-9]{6,14}$'),
+  CHECK (destination_type <> 'email' OR (destination = lower(destination) AND destination ~ '^[^@\s]+@[^@\s]+\.[^@\s]+$')),
+  CHECK (purpose <> 'add_contact' OR account_id IS NOT NULL)
+);
+-- At most one live challenge per phone number or email address.
+CREATE UNIQUE INDEX otp_challenge_pending_uniq ON identity.otp_challenge (destination) WHERE status = 'pending';
+CREATE INDEX otp_challenge_destination_idx ON identity.otp_challenge (destination, created_at);
+CREATE INDEX otp_challenge_ip_idx ON identity.otp_challenge (ip_hmac, created_at) WHERE ip_hmac IS NOT NULL;
+
+-- A challenge's terms never change; attempts and sends only go up; a finished challenge is final.
+CREATE FUNCTION identity.guard_otp_challenge() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.status <> 'pending' THEN
+    RAISE EXCEPTION 'one-time code challenge is %; it cannot change', OLD.status USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF (NEW.purpose, NEW.destination_type, NEW.destination, NEW.code_salt, NEW.code_hmac, NEW.code_length,
+      NEW.max_attempts, NEW.max_sends, NEW.created_at, NEW.expires_at, NEW.ip_hmac)
+     IS DISTINCT FROM
+     (OLD.purpose, OLD.destination_type, OLD.destination, OLD.code_salt, OLD.code_hmac, OLD.code_length,
+      OLD.max_attempts, OLD.max_sends, OLD.created_at, OLD.expires_at, OLD.ip_hmac) THEN
+    RAISE EXCEPTION 'one-time code challenge terms are immutable' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF OLD.account_id IS NOT NULL AND NEW.account_id IS DISTINCT FROM OLD.account_id THEN
+    RAISE EXCEPTION 'one-time code challenge account cannot change' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF NEW.attempts < OLD.attempts OR NEW.send_count < OLD.send_count OR NEW.last_sent_at < OLD.last_sent_at THEN
+    RAISE EXCEPTION 'one-time code attempts and sends never go down' USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER otp_challenge_guard BEFORE UPDATE ON identity.otp_challenge
+  FOR EACH ROW EXECUTE FUNCTION identity.guard_otp_challenge();
+CREATE TRIGGER otp_challenge_audit AFTER INSERT OR UPDATE ON identity.otp_challenge
+  FOR EACH ROW EXECUTE FUNCTION audit.log_state_change('status');
 
 -- -----------------------------------------------------------------------------
 -- ledger: the one wallet ledger (R1)
@@ -1585,25 +1652,69 @@ CREATE TRIGGER dispute_evidence_append_only BEFORE UPDATE OR DELETE ON support.d
   FOR EACH ROW EXECUTE FUNCTION audit.forbid_mutation();
 
 -- -----------------------------------------------------------------------------
--- comms: one template library, messages with delivery status, preferences
+-- comms: one template library, messages with delivery status, preferences,
+-- inbound chat messages and conversations (docs/16-communications.md)
 -- -----------------------------------------------------------------------------
 
+-- GSM 03.38 basic character set plus its extension table: an SMS in these characters fits
+-- 160 per segment. Anything else forces UCS-2 (70 per segment) or is mangled by some networks.
+CREATE FUNCTION comms.is_gsm7(p text) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT translate(p, '@£$¥èéùìòÇØøÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !"#¤%&''()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà^{}\[~]|€'
+                     || chr(10) || chr(13), '') = ''
+$$;
+
 CREATE TABLE comms.template (
-  key                    text NOT NULL,          -- 'outbid', 'ending_soon', 'won', 'invoice', ...
+  key                    text NOT NULL,          -- 'outbid', 'ending_soon_leading', 'won', 'invoice_issued', ...
   version                integer NOT NULL CHECK (version > 0),
   channel                text NOT NULL CHECK (channel IN ('whatsapp', 'push', 'sms', 'email', 'in_app')),
   locale                 text NOT NULL DEFAULT 'en-ZW',
   category               text NOT NULL CHECK (category IN ('transactional', 'alert', 'marketing')),
+  subject                text,                   -- email subject; title for push and the in-app feed
   body                   text NOT NULL,          -- or provider template body with placeholders
   provider_template_name text,                   -- WhatsApp approved template name
   status                 text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'retired')),
-  PRIMARY KEY (key, version, channel, locale)
+  PRIMARY KEY (key, version, channel, locale),
+  CONSTRAINT template_email_subject CHECK (channel <> 'email' OR subject IS NOT NULL),
+  CONSTRAINT template_subject_channels CHECK (subject IS NULL OR channel IN ('email', 'push', 'in_app')),
+  CONSTRAINT template_sms_gsm7 CHECK (channel <> 'sms' OR comms.is_gsm7(body))
 );
+
+-- An approved template is what people were told: it never changes (a new version does), and a
+-- retired one stays retired.
+CREATE FUNCTION comms.guard_template() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.status <> 'draft' THEN
+      RAISE EXCEPTION 'template %/% v% is %; it is never deleted', OLD.key, OLD.channel, OLD.version, OLD.status
+        USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF OLD.status = 'retired' THEN
+    RAISE EXCEPTION 'retired templates cannot change' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF OLD.status = 'approved'
+     AND (NEW.status = 'draft'
+          OR (NEW.body, NEW.subject, NEW.provider_template_name, NEW.category)
+             IS DISTINCT FROM (OLD.body, OLD.subject, OLD.provider_template_name, OLD.category)) THEN
+    RAISE EXCEPTION 'approved template %/% v% cannot change; add a new version', OLD.key, OLD.channel, OLD.version
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER template_guard BEFORE UPDATE OR DELETE ON comms.template
+  FOR EACH ROW EXECUTE FUNCTION comms.guard_template();
 
 CREATE TABLE comms.message (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  message_key          text NOT NULL,            -- business event, e.g. 'outbid:<bid id>'
-  recipient_account_id uuid NOT NULL REFERENCES identity.account (id),
+  message_key          text NOT NULL,            -- business event, e.g. 'outbid:<outbox id>'
+  recipient_account_id uuid REFERENCES identity.account (id),
+  recipient_address    text                      -- E.164 or email: a sign-up code, a reply to an unknown number,
+                         CHECK (recipient_address IS NULL OR recipient_address ~ '^\+[1-9][0-9]{6,14}$'
+                                OR recipient_address ~ '^[^@\s]+@[^@\s]+$'),  -- or where a code was asked for
   channel              text NOT NULL CHECK (channel IN ('whatsapp', 'push', 'sms', 'email', 'in_app')),
   template_key         text NOT NULL,
   template_version     integer NOT NULL,
@@ -1614,24 +1725,177 @@ CREATE TABLE comms.message (
   provider             text,
   provider_message_id  text,
   fallback_of          uuid REFERENCES comms.message (id),
+  outbox_id            bigint REFERENCES core.outbox (id),
+  attempts             integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  next_attempt_at      timestamptz NOT NULL DEFAULT clock_timestamp(), -- quiet hours, retry backoff, send lease
+  fallback_due_at      timestamptz,              -- next channel if not delivered by then
+  expires_at           timestamptz,              -- no use after this (lot closed, code expired): suppressed, not sent
   queued_at            timestamptz NOT NULL DEFAULT clock_timestamp(),
   sent_at              timestamptz,
   delivered_at         timestamptz,
+  read_at              timestamptz,
   failure_reason       text,
   FOREIGN KEY (template_key, template_version, channel, locale)
     REFERENCES comms.template (key, version, channel, locale),
-  UNIQUE (message_key, channel, recipient_account_id)   -- R4
+  UNIQUE (message_key, channel, recipient_account_id),   -- R4
+  CONSTRAINT message_recipient CHECK (recipient_account_id IS NOT NULL OR recipient_address IS NOT NULL),
+  CONSTRAINT message_sent_has_provider CHECK (status NOT IN ('sent', 'delivered', 'read')
+                                              OR (sent_at IS NOT NULL AND provider IS NOT NULL AND provider_message_id IS NOT NULL)),
+  CONSTRAINT message_delivered_at CHECK (status NOT IN ('delivered', 'read') OR delivered_at IS NOT NULL),
+  CONSTRAINT message_read_at CHECK ((status = 'read') = (read_at IS NOT NULL)),
+  CONSTRAINT message_failure_reason CHECK (status NOT IN ('failed', 'suppressed') OR failure_reason IS NOT NULL),
+  CONSTRAINT message_fallback_not_self CHECK (fallback_of IS NULL OR fallback_of <> id)
 );
 CREATE INDEX message_recipient_idx ON comms.message (recipient_account_id, queued_at);
+-- R4 for messages to an address with no account yet (a sign-up code, a reply to an unknown number).
+CREATE UNIQUE INDEX message_address_uniq ON comms.message (message_key, channel, recipient_address) WHERE recipient_account_id IS NULL;
+-- A provider's id names one message, so a status webhook updates exactly one row.
+CREATE UNIQUE INDEX message_provider_uniq ON comms.message (provider, provider_message_id) WHERE provider_message_id IS NOT NULL;
+CREATE INDEX message_queued_idx ON comms.message (next_attempt_at) WHERE status = 'queued';
+CREATE INDEX message_fallback_due_idx ON comms.message (fallback_due_at) WHERE status = 'sent' AND fallback_due_at IS NOT NULL;
+CREATE INDEX message_feed_idx ON comms.message (recipient_account_id, queued_at DESC) WHERE channel = 'in_app';
+CREATE INDEX message_fallback_of_idx ON comms.message (fallback_of) WHERE fallback_of IS NOT NULL;
+
+-- Status only moves forward: queued → sent → delivered → read, or to failed / suppressed.
+-- Who, what and how never change after queueing. Messages are never deleted.
+CREATE FUNCTION comms.guard_message() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_parent comms.message%ROWTYPE;
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION 'comms.message is a record of what people were told: DELETE is not allowed'
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.fallback_of IS NOT NULL THEN
+      SELECT * INTO v_parent FROM comms.message WHERE id = NEW.fallback_of;
+      IF v_parent.message_key IS DISTINCT FROM NEW.message_key
+         OR v_parent.recipient_account_id IS DISTINCT FROM NEW.recipient_account_id
+         OR v_parent.recipient_address IS DISTINCT FROM NEW.recipient_address
+         OR v_parent.channel = NEW.channel THEN
+        RAISE EXCEPTION 'a fallback is the same message to the same person on another channel'
+          USING ERRCODE = 'check_violation';
+      END IF;
+    END IF;
+    RETURN NEW;
+  END IF;
+  IF (NEW.message_key, NEW.recipient_account_id, NEW.recipient_address, NEW.channel, NEW.template_key,
+      NEW.template_version, NEW.locale, NEW.fallback_of, NEW.queued_at, NEW.outbox_id, NEW.expires_at)
+     IS DISTINCT FROM
+     (OLD.message_key, OLD.recipient_account_id, OLD.recipient_address, OLD.channel, OLD.template_key,
+      OLD.template_version, OLD.locale, OLD.fallback_of, OLD.queued_at, OLD.outbox_id, OLD.expires_at) THEN
+    RAISE EXCEPTION 'a queued message''s recipient, channel and template cannot change' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF NEW.status <> OLD.status AND NOT (
+       (OLD.status = 'queued'    AND NEW.status IN ('sent', 'delivered', 'read', 'failed', 'suppressed'))
+    OR (OLD.status = 'sent'      AND NEW.status IN ('delivered', 'read', 'failed'))
+    OR (OLD.status = 'delivered' AND NEW.status = 'read')) THEN
+    RAISE EXCEPTION 'message status cannot go from % to %', OLD.status, NEW.status USING ERRCODE = 'check_violation';
+  END IF;
+  IF OLD.provider_message_id IS NOT NULL AND NEW.provider_message_id IS DISTINCT FROM OLD.provider_message_id THEN
+    RAISE EXCEPTION 'a message''s provider id cannot change' USING ERRCODE = 'restrict_violation';
+  END IF;
+  IF NEW.attempts < OLD.attempts THEN
+    RAISE EXCEPTION 'message attempts never go down' USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER message_guard BEFORE INSERT OR UPDATE OR DELETE ON comms.message
+  FOR EACH ROW EXECUTE FUNCTION comms.guard_message();
+CREATE TRIGGER message_audit AFTER INSERT OR UPDATE ON comms.message
+  FOR EACH ROW EXECUTE FUNCTION audit.log_state_change('status');
 
 CREATE TABLE comms.preference (
   account_id uuid NOT NULL REFERENCES identity.account (id),
-  category   text NOT NULL,                      -- 'outbid', 'ending_soon', 'saved_search', 'marketing', ...
+  category   text NOT NULL,                      -- 'outbid', 'ending_soon', 'payments', 'marketing', ... (docs/16 §6)
   channel    text NOT NULL CHECK (channel IN ('whatsapp', 'push', 'sms', 'email')),
   enabled    boolean NOT NULL,
   updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
-  PRIMARY KEY (account_id, category, channel)
+  PRIMARY KEY (account_id, category, channel),
+  CONSTRAINT preference_category CHECK (category IN ('outbid', 'ending_soon', 'auction_results', 'payments', 'collection',
+                                                     'selling', 'account', 'staff_tasks', 'marketing'))
 );
+
+-- Transactional categories always keep at least one channel (docs/16 §6).
+CREATE FUNCTION comms.guard_preference() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NOT NEW.enabled
+     AND NEW.category IN ('auction_results', 'payments', 'collection', 'selling', 'account', 'staff_tasks')
+     AND (SELECT count(*) FROM comms.preference
+           WHERE account_id = NEW.account_id AND category = NEW.category AND NOT enabled) >= 4 THEN
+    RAISE EXCEPTION '% messages need at least one channel', NEW.category USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE CONSTRAINT TRIGGER preference_keeps_a_channel AFTER INSERT OR UPDATE ON comms.preference
+  FOR EACH ROW EXECUTE FUNCTION comms.guard_preference();
+
+-- Preference changes are recorded with the category and channel they changed.
+CREATE FUNCTION comms.audit_preference() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_actor text := nullif(current_setting('app.actor_type', true), '');
+BEGIN
+  IF TG_OP = 'UPDATE' AND OLD.enabled = NEW.enabled THEN
+    RETURN NEW;
+  END IF;
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'audit actor not set: % on comms.preference must call audit.set_actor() first', TG_OP
+      USING ERRCODE = 'insufficient_privilege';
+  END IF;
+  INSERT INTO audit.event (actor_type, actor_id, actor_name, entity_type, entity_id, action, from_state, to_state, reason, request_id, data)
+  VALUES (v_actor, nullif(current_setting('app.actor_id', true), ''), nullif(current_setting('app.actor_name', true), ''),
+          'comms.preference', NEW.account_id::text, CASE TG_OP WHEN 'INSERT' THEN 'create' ELSE 'enabled_change' END,
+          CASE TG_OP WHEN 'UPDATE' THEN OLD.enabled::text END, NEW.enabled::text,
+          nullif(current_setting('app.reason', true), ''), nullif(current_setting('app.request_id', true), ''),
+          jsonb_build_object('category', NEW.category, 'channel', NEW.channel));
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER preference_audit AFTER INSERT OR UPDATE ON comms.preference
+  FOR EACH ROW EXECUTE FUNCTION comms.audit_preference();
+
+-- Each inbound provider message is handled once, however often the provider retries the webhook.
+-- Only ids and kind are kept; the text lives in the conversation state while it is needed.
+CREATE TABLE comms.inbound_message (
+  provider            text NOT NULL,
+  provider_message_id text NOT NULL,
+  from_address        text NOT NULL CHECK (from_address ~ '^\+[1-9][0-9]{6,14}$'),
+  kind                text NOT NULL CHECK (kind IN ('text', 'image', 'other')),
+  received_at         timestamptz NOT NULL DEFAULT clock_timestamp(),
+  PRIMARY KEY (provider, provider_message_id)
+);
+
+CREATE TRIGGER inbound_message_append_only BEFORE UPDATE OR DELETE ON comms.inbound_message
+  FOR EACH ROW EXECUTE FUNCTION audit.forbid_mutation();
+
+-- A chat flow's state between messages (seller intake over WhatsApp, packages/seller).
+CREATE TABLE comms.conversation (
+  id             uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  channel        text NOT NULL CHECK (channel IN ('whatsapp')),
+  address        text NOT NULL CHECK (address ~ '^\+[1-9][0-9]{6,14}$'),
+  account_id     uuid NOT NULL REFERENCES identity.account (id),
+  flow           text NOT NULL CHECK (flow IN ('seller_intake')),
+  step           text NOT NULL CHECK (step IN ('category', 'title', 'condition', 'photos', 'reserve', 'confirm',
+                                                'submitting', 'done', 'cancelled')),
+  state          jsonb NOT NULL,
+  consignment_id uuid REFERENCES seller.consignment (id),
+  lot_id         uuid REFERENCES catalogue.lot (id),
+  started_at     timestamptz NOT NULL DEFAULT clock_timestamp(),
+  updated_at     timestamptz NOT NULL DEFAULT clock_timestamp(),
+  ended_at       timestamptz,
+  CHECK ((step IN ('done', 'cancelled')) = (ended_at IS NOT NULL)),
+  CHECK (step <> 'done' OR (consignment_id IS NOT NULL AND lot_id IS NOT NULL))
+);
+-- One open conversation per chat.
+CREATE UNIQUE INDEX conversation_open_uniq ON comms.conversation (channel, address) WHERE ended_at IS NULL;
+
+CREATE TRIGGER conversation_audit AFTER INSERT OR UPDATE ON comms.conversation
+  FOR EACH ROW EXECUTE FUNCTION audit.log_state_change('step');
 
 -- -----------------------------------------------------------------------------
 -- Public read models
