@@ -691,6 +691,236 @@ SELECT test.expect_error('A resolved ticket records when it was resolved', ARRAY
   $$UPDATE support.ticket SET status = 'resolved' WHERE id = '00000000-0000-0000-0000-000000000e11'$$],
   'check constraint');
 
+
+-- Deliverables 18 and 19: admin and operations, analytics
+-- -----------------------------------------------------------------------------
+
+SELECT test.expect_ok('Admin R3: an override request is raised with what it will do and when it lapses', ARRAY[
+  $$INSERT INTO audit.override_request (id, action_type, entity_type, entity_id, currency, amount_minor, reason,
+                                        requested_by, requires_second_approval, payload, expires_at, client_key)
+    VALUES ('00000000-0000-0000-0000-00000000ad01', 'limit_change', 'identity.account', '00000000-0000-0000-0000-0000000000b2',
+            'USD', 90000, 'Regular buyer with a bank guarantee on file', '00000000-0000-0000-0000-0000000000f1', true,
+            '{"kind": "limit_change", "limitMinor": "90000"}', now() + interval '72 hours', 'key-1')$$]);
+
+SELECT test.expect_error('Admin R3: an override request cannot be edited once raised', ARRAY[
+  $$UPDATE audit.override_request SET amount_minor = 100 WHERE id = '00000000-0000-0000-0000-00000000ad01'$$],
+  'cannot be edited');
+
+SELECT test.expect_error('Admin R3: an override request is never deleted', ARRAY[
+  $$DELETE FROM audit.override_request WHERE id = '00000000-0000-0000-0000-00000000ad01'$$],
+  'never deleted');
+
+SELECT test.expect_error('Admin R4: the same client key cannot raise a second request', ARRAY[
+  $$INSERT INTO audit.override_request (action_type, entity_type, entity_id, reason, requested_by, requires_second_approval, client_key)
+    VALUES ('tier_change', 'identity.account', 'x', 'Retried request from the console', '00000000-0000-0000-0000-0000000000f1', true, 'key-1')$$],
+  'duplicate key');
+
+SELECT test.expect_error('Admin R3: a pending request cannot be executed without approval', ARRAY[
+  $$UPDATE audit.override_request SET status = 'executed' WHERE id = '00000000-0000-0000-0000-00000000ad01'$$],
+  'not allowed');
+
+SELECT test.expect_error('Admin R3: a rejection needs a note', ARRAY[
+  $$UPDATE audit.override_request SET status = 'rejected' WHERE id = '00000000-0000-0000-0000-00000000ad01'$$],
+  'check constraint');
+
+SELECT test.expect_ok('Admin R3: a second person approves, then the override is executed', ARRAY[
+  $$UPDATE audit.override_request SET status = 'approved', approved_by = '00000000-0000-0000-0000-0000000000f2'
+     WHERE id = '00000000-0000-0000-0000-00000000ad01'$$,
+  $$UPDATE audit.override_request SET status = 'executed' WHERE id = '00000000-0000-0000-0000-00000000ad01'$$]);
+
+SELECT test.assert('Admin R3: approval and execution are stamped with server time',
+  (SELECT decided_at IS NOT NULL AND executed_at IS NOT NULL FROM audit.override_request
+    WHERE id = '00000000-0000-0000-0000-00000000ad01'));
+
+SELECT test.expect_error('Admin R3: a decided request cannot be decided again', ARRAY[
+  $$UPDATE audit.override_request SET status = 'rejected', decision_note = 'Changed my mind'
+     WHERE id = '00000000-0000-0000-0000-00000000ad01'$$],
+  'not allowed');
+
+SELECT test.expect_error('Admin R3: a lapsed request cannot be approved', ARRAY[
+  $$INSERT INTO audit.override_request (id, action_type, entity_type, entity_id, reason, requested_by, requires_second_approval,
+                                        requested_at, expires_at)
+    VALUES ('00000000-0000-0000-0000-00000000ad02', 'tier_change', 'identity.account', '00000000-0000-0000-0000-0000000000b2',
+            'Lift the restriction after review', '00000000-0000-0000-0000-0000000000f1', true,
+            now() - interval '4 days', now() - interval '1 day')$$,
+  $$UPDATE audit.override_request SET status = 'approved', approved_by = '00000000-0000-0000-0000-0000000000f2'
+     WHERE id = '00000000-0000-0000-0000-00000000ad02'$$],
+  'lapsed');
+
+INSERT INTO rulebook.rule_set_version (id, label, effective_from, status, authored_by) VALUES
+  ('00000000-0000-0000-0000-00000000e0d1', 'test-draft', now() + interval '7 days', 'draft', '00000000-0000-0000-0000-0000000000f1');
+
+SELECT test.expect_error('Admin R2: the author of a rule set cannot acknowledge its warnings', ARRAY[
+  $$INSERT INTO rulebook.warning_acknowledgement (version_id, warning_id, code, rule_key, message, reason, acknowledged_by)
+    VALUES ('00000000-0000-0000-0000-00000000e0d1', 'provenance_assumption:x:1', 'provenance_assumption', 'x', 'm',
+            'Placeholder accepted pending finance', '00000000-0000-0000-0000-0000000000f1')$$],
+  'cannot acknowledge');
+
+SELECT test.expect_ok('Admin R2: a second person acknowledges a warning by name, with a reason', ARRAY[
+  $$INSERT INTO rulebook.warning_acknowledgement (version_id, warning_id, code, rule_key, message, reason, acknowledged_by)
+    VALUES ('00000000-0000-0000-0000-00000000e0d1', 'provenance_assumption:x:1', 'provenance_assumption', 'x', 'm',
+            'Placeholder accepted pending finance', '00000000-0000-0000-0000-0000000000f2')$$]);
+
+SELECT test.expect_error('Admin R2: acknowledgements cannot be changed', ARRAY[
+  $$UPDATE rulebook.warning_acknowledgement SET reason = 'Something else entirely' WHERE version_id = '00000000-0000-0000-0000-00000000e0d1'$$],
+  'append-only');
+
+SELECT test.expect_error('Admin R2: a published rule set''s warnings are not acknowledged after the fact', ARRAY[
+  $$INSERT INTO rulebook.warning_acknowledgement (version_id, warning_id, code, message, reason, acknowledged_by)
+    VALUES ('00000000-0000-0000-0000-00000000e001', 'w:1', 'w', 'm', 'Too late to acknowledge this', '00000000-0000-0000-0000-0000000000f2')$$],
+  'only a draft');
+
+SELECT test.expect_error('Admin R2: two published rule sets cannot take effect at the same moment', ARRAY[
+  $$UPDATE rulebook.rule_set_version SET status = 'published', approved_by = '00000000-0000-0000-0000-0000000000f2',
+            published_at = now(), effective_from = now() - interval '1 day'
+     WHERE id = '00000000-0000-0000-0000-00000000e0d1'$$],
+  'duplicate key');
+
+INSERT INTO rulebook.tax_rate (id, tax_code, tax_class, currency, rate_bp, base, effective_from, active, provenance) VALUES
+  ('00000000-0000-0000-0000-00000000e0a1', 'vat', 'vehicle_standard', 'USD', 1550, 'hammer', now() - interval '1 day', false, 'benchmark');
+
+SELECT test.expect_error('Admin Q9: a tax rate cannot be activated without an approved override', ARRAY[
+  $$UPDATE rulebook.tax_rate SET active = true, approved_by = '00000000-0000-0000-0000-0000000000f2'
+     WHERE id = '00000000-0000-0000-0000-00000000e0a1'$$],
+  'activation needs');
+
+SELECT test.expect_ok('Admin Q9: finance activates a tax rate after a second person approves', ARRAY[
+  $$INSERT INTO audit.override_request (id, action_type, entity_type, entity_id, reason, requested_by, requires_second_approval,
+                                        status, approved_by)
+    VALUES ('00000000-0000-0000-0000-00000000ad03', 'tax_rate_activation', 'rulebook.tax_rate', '00000000-0000-0000-0000-00000000e0a1',
+            'Finance confirmed the VAT rate for vehicles', '00000000-0000-0000-0000-0000000000f1', true,
+            'approved', '00000000-0000-0000-0000-0000000000f2')$$,
+  $$UPDATE rulebook.tax_rate SET active = true, approved_by = '00000000-0000-0000-0000-0000000000f2',
+            activation_override_id = '00000000-0000-0000-0000-00000000ad03'
+     WHERE id = '00000000-0000-0000-0000-00000000e0a1'$$]);
+
+SELECT test.expect_ok('Admin R1: an approved write-off posts to the write-off expense account', ARRAY[
+  $$INSERT INTO ledger.book_account (id, owner_type, owner_id, purpose, sub_code, currency, normal_side, allow_negative)
+    VALUES ('00000000-0000-0000-0000-00000000c020', 'platform', NULL, 'write_off', '', 'USD', 'D', false)$$,
+  $$SELECT ledger.post_journal('adjustment', 'USD', 'write-off-1', 'Reconciliation write-off',
+      '[{"account": "00000000-0000-0000-0000-00000000c020", "amount": 100},
+        {"account": "00000000-0000-0000-0000-00000000c010", "amount": -100}]')$$]);
+
+INSERT INTO registration.registration (id, account_id, auction_id, status, flag_reasons, limit_snapshot) VALUES
+  ('00000000-0000-0000-0000-0000000003a2', '00000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-0000000000e1',
+   'pending_review', '{linked_to_seller}', '{}');
+
+SELECT test.expect_error('Admin: a staff decision on a registration needs a note', ARRAY[
+  $$UPDATE registration.registration SET status = 'approved', decided_by_type = 'staff',
+            decided_by = '00000000-0000-0000-0000-0000000000f1', decided_at = now()
+     WHERE id = '00000000-0000-0000-0000-0000000003a2'$$],
+  'check constraint');
+
+SELECT test.expect_ok('Admin: risk staff approve a pending registration with a note', ARRAY[
+  $$UPDATE registration.registration SET status = 'approved', decided_by_type = 'staff',
+            decided_by = '00000000-0000-0000-0000-0000000000f1', decided_at = now(),
+            decision_note = 'Shared device is a family phone; checked by call'
+     WHERE id = '00000000-0000-0000-0000-0000000003a2'$$]);
+
+SELECT test.expect_error('Admin: a decided registration cannot go back to review', ARRAY[
+  $$UPDATE registration.registration SET status = 'pending_review' WHERE id = '00000000-0000-0000-0000-0000000003a2'$$],
+  'not allowed');
+
+INSERT INTO settlement.default_case (id, invoice_id) VALUES
+  ('00000000-0000-0000-0000-00000000dc01', '00000000-0000-0000-0000-0000000007a2');
+
+SELECT test.expect_error('Admin: a default step is not waived without an approved override of the matching type', ARRAY[
+  $$INSERT INTO settlement.default_waiver (default_case_id, step, effect, override_request_id, reason, waived_by)
+    VALUES ('00000000-0000-0000-0000-00000000dc01', 'relist_fee', 'prevented', '00000000-0000-0000-0000-00000000ad01',
+            'Buyer was in hospital on the due date', '00000000-0000-0000-0000-0000000000f1')$$],
+  'needs an approved override');
+
+SELECT test.expect_ok('Admin: a relisting fee is waived with an approved fee waiver', ARRAY[
+  $$INSERT INTO audit.override_request (id, action_type, entity_type, entity_id, currency, amount_minor, reason, requested_by,
+                                        requires_second_approval, status)
+    VALUES ('00000000-0000-0000-0000-00000000ad04', 'fee_waiver', 'settlement.default_case', '00000000-0000-0000-0000-00000000dc01',
+            'USD', 1000, 'Buyer was in hospital on the due date', '00000000-0000-0000-0000-0000000000f1', false, 'approved')$$,
+  $$INSERT INTO settlement.default_waiver (id, default_case_id, step, effect, override_request_id, reason, waived_by)
+    VALUES ('00000000-0000-0000-0000-00000000dd01', '00000000-0000-0000-0000-00000000dc01', 'relist_fee', 'prevented',
+            '00000000-0000-0000-0000-00000000ad04', 'Buyer was in hospital on the due date', '00000000-0000-0000-0000-0000000000f1')$$]);
+
+SELECT test.expect_error('Admin: a waived default step is never applied afterwards', ARRAY[
+  $$INSERT INTO settlement.default_step (default_case_id, step, journal_id)
+    SELECT '00000000-0000-0000-0000-00000000dc01', 'relist_fee', id FROM ledger.journal WHERE idempotency_key = 'topup-1'$$],
+  'was waived');
+
+SELECT test.expect_error('Admin: a prevented step moves no money', ARRAY[
+  $$INSERT INTO audit.override_request (id, action_type, entity_type, entity_id, reason, requested_by, requires_second_approval, status)
+    VALUES ('00000000-0000-0000-0000-00000000ad05', 'deposit_forfeit_waiver', 'settlement.default_case',
+            '00000000-0000-0000-0000-00000000dc01', 'Bank outage on the due date', '00000000-0000-0000-0000-0000000000f1', false, 'approved')$$,
+  $$INSERT INTO settlement.default_waiver (default_case_id, step, effect, override_request_id, reason, waived_by, journal_ids)
+    SELECT '00000000-0000-0000-0000-00000000dc01', 'deposit_forfeit', 'prevented', '00000000-0000-0000-0000-00000000ad05',
+           'Bank outage on the due date', '00000000-0000-0000-0000-0000000000f1', ARRAY[id] FROM ledger.journal WHERE idempotency_key = 'topup-1'$$],
+  'check constraint');
+
+SELECT test.expect_error('Admin: waivers are append-only', ARRAY[
+  $$DELETE FROM settlement.default_waiver WHERE id = '00000000-0000-0000-0000-00000000dd01'$$],
+  'append-only');
+
+SELECT test.expect_error('Admin: one open appeal per default case', ARRAY[
+  $$INSERT INTO settlement.default_appeal (default_case_id, raised_by, raised_via, steps, grounds)
+    VALUES ('00000000-0000-0000-0000-00000000dc01', '00000000-0000-0000-0000-0000000000b1', 'buyer', '{deposit_forfeit}',
+            'The EcoCash payment failed twice on the due date')$$,
+  $$INSERT INTO settlement.default_appeal (default_case_id, raised_by, raised_via, steps, grounds)
+    VALUES ('00000000-0000-0000-0000-00000000dc01', '00000000-0000-0000-0000-0000000000b1', 'buyer', '{relist_fee}',
+            'Second appeal for the same default case')$$],
+  'duplicate key');
+
+SELECT test.expect_error('Admin: an appeal decision names the decider and gives a reason', ARRAY[
+  $$INSERT INTO settlement.default_appeal (id, default_case_id, raised_by, raised_via, steps, grounds)
+    VALUES ('00000000-0000-0000-0000-00000000de01', '00000000-0000-0000-0000-00000000dc01', '00000000-0000-0000-0000-0000000000b1',
+            'buyer', '{deposit_forfeit}', 'The EcoCash payment failed twice on the due date')$$,
+  $$UPDATE settlement.default_appeal SET status = 'upheld' WHERE id = '00000000-0000-0000-0000-00000000de01'$$],
+  'check constraint');
+
+INSERT INTO payment.reconciliation_run (id, source, currency, statement_date, status, matched_count, exception_count) VALUES
+  ('00000000-0000-0000-0000-00000000ee01', 'paynow', 'USD', current_date, 'exceptions', 1, 1);
+INSERT INTO payment.reconciliation_item (id, run_id, external_reference, statement_amount_minor, outcome) VALUES
+  (900001, '00000000-0000-0000-0000-00000000ee01', 'PN-999', NULL, 'missing_at_source'),
+  (900002, '00000000-0000-0000-0000-00000000ee01', 'PN-123', 5000, 'matched');
+
+SELECT test.expect_error('Admin: a matched reconciliation item has nothing to resolve', ARRAY[
+  $$UPDATE payment.reconciliation_item SET resolution = 'gateway_error', resolved_by = '00000000-0000-0000-0000-0000000000f1',
+            resolved_at = now(), resolution_note = 'Gateway sent the line twice'
+     WHERE id = 900002$$],
+  'nothing to resolve');
+
+SELECT test.expect_error('Admin: resolving a reconciliation item needs a note', ARRAY[
+  $$UPDATE payment.reconciliation_item SET resolution = 'gateway_error', resolved_by = '00000000-0000-0000-0000-0000000000f1',
+            resolved_at = now(), resolution_note = 'ok'
+     WHERE id = 900001$$],
+  'check constraint');
+
+SELECT test.expect_error('Admin: a write-off needs a ledger adjustment approved by a second person', ARRAY[
+  $$UPDATE payment.reconciliation_item SET resolution = 'written_off', resolved_by = '00000000-0000-0000-0000-0000000000f1',
+            resolved_at = now(), resolution_note = 'Gateway never received the money',
+            override_request_id = '00000000-0000-0000-0000-00000000ad01',
+            journal_id = (SELECT id FROM ledger.journal WHERE idempotency_key = 'write-off-1')
+     WHERE id = 900001$$],
+  'second person');
+
+SELECT test.expect_ok('Admin: finance marks a statement line as a gateway error, with a note', ARRAY[
+  $$UPDATE payment.reconciliation_item SET resolution = 'gateway_error', resolved_by = '00000000-0000-0000-0000-0000000000f1',
+            resolved_at = now(), resolution_note = 'Paynow confirmed the line was a test transaction'
+     WHERE id = 900001$$]);
+
+SELECT test.expect_error('Admin: a reconciliation resolution is final', ARRAY[
+  $$UPDATE payment.reconciliation_item SET resolution_note = 'Rewritten after the fact' WHERE id = 900001$$],
+  'already resolved');
+
+SELECT test.expect_error('Analytics: a frozen baseline cannot be changed', ARRAY[
+  $$INSERT INTO analytics.baseline_snapshot (id, label, period_from, period_to, measures, frozen_by)
+    VALUES ('00000000-0000-0000-0000-00000000ab01', 'baseline-test', now() - interval '30 days', now(), '{}',
+            '00000000-0000-0000-0000-0000000000f1')$$,
+  $$UPDATE analytics.baseline_snapshot SET measures = '{"changed": true}' WHERE id = '00000000-0000-0000-0000-00000000ab01'$$],
+  'append-only');
+
+SELECT test.assert('Analytics: every measure is a read-only (STABLE) function, safe on a read replica',
+  (SELECT count(*) >= 12 AND bool_and(provolatile = 's') FROM pg_proc WHERE pronamespace = 'analytics'::regnamespace));
+
+SELECT test.assert('Analytics: support measures are NULL, not zero, until ticket events exist',
+  (SELECT NOT instrumented AND tickets IS NULL FROM analytics.support_measures(now() - interval '30 days', now() + interval '1 day')));
+
 SELECT 'ALL INVARIANT TESTS PASSED' AS result;
 
 ROLLBACK;

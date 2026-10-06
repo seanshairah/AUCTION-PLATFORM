@@ -140,7 +140,7 @@ export async function migrate(db: Db, steps: MigrationStep[] = migrationSteps(),
 
 /** The System's schemas, as created by db/schema.sql. */
 export const SYSTEM_SCHEMAS = ['core', 'audit', 'rulebook', 'identity', 'ledger', 'payment', 'payout', 'seller', 'catalogue', 'auction',
-  'registration', 'bidding', 'settlement', 'logistics', 'support', 'comms'] as const;
+  'registration', 'bidding', 'settlement', 'logistics', 'support', 'comms', 'analytics'] as const;
 
 /**
  * Drops every System schema and the migration record: the only way to remove

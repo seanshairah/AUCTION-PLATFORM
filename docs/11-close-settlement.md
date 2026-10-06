@@ -104,7 +104,7 @@ Example (placeholder rates, BENCHMARK): hammer US$260.00, levy US$39.00, VAT US$
 
 Scenario B tests the whole ladder: a US$700 lot unpaid, US$500 deposit forfeited, invoice cancelled, US$70 relist fee from the wallet, Bob Restricted, lot back on sale, books reconciled.
 
-**Appeals (not built yet).** The design lets risk staff waive a step before it runs: an override of type `deposit_forfeit_waiver`, with a reason and a second approver above the threshold, after which the ladder skips that step and the default case closes as `waived`. The schema already has the override type and the `waived` status; the ladder check and the admin screen come with deliverable 18. Until then the ladder runs every step.
+**Appeals (built in deliverable 18).** A buyer appeals a step, and risk or finance staff waive it with a reason through an override (`deposit_forfeit_waiver`, `fee_waiver` or `tier_change`), with a second approver above the threshold. A waiver before the step runs prevents it: the ladder skips it, and the database refuses to apply it. A waiver after it ran reverses it with ledger journals. When every waivable step is waived, the default case closes as `waived` ([18 §8](18-admin-operations.md#8-default-appeals-and-waivers)).
 
 ## 10. Payouts after release
 

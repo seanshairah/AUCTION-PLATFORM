@@ -80,12 +80,13 @@ Refusals:
 |---|---|
 | `0001_vehicle_body_and_drive` | `catalogue.vehicle.body_style` and `drive` (with checks) for the dashboard filters; index on make and model. `VehicleService.setDetails` now records fuel, transmission, colour, body style and drive |
 | `0003_logistics_support` | Slot bookings, storage charges, deliveries and their events ([15](15-logistics.md)); claim decisions, tickets and messages, payout holds and clawbacks ([17](17-support-disputes.md)); journal kinds `storage_fee`, `delivery_charge`, `clawback`; lot transition `paid_out → refunded` |
+| `0004_admin_analytics` | Admin and operations ([18](18-admin-operations.md)) and analytics ([19](19-analytics.md)): override payload, lapse and guarded transitions; tax activation by override; warning acknowledgements and one effective rule set; `write_off` expense account; staff registration decisions; default appeals and waivers; reconciliation resolutions; schema `analytics` (measure functions and the baseline) |
 
 ## 5. Demo data
 
 `pnpm demo:seed` (A41) builds a believable environment **through the production services**, so every gate is exercised:
 
-1. Demo staff (two people, each granting the other's role), a dealer seller and three bidders.
+1. Demo staff (ops, finance and risk; no one grants their own role), a dealer seller and three bidders. Staff sign in with `POST /session/demo-staff` ([18 §11](18-admin-operations.md#11-api)).
 2. A published rule set `<label>-demo`: the initial rule set plus an illustrative 10 % commission (Q3), with its tax rates activated (Q9). Both are labelled "DEMO ONLY". The rulebook is skipped if a real rule set is already published.
 3. Branch-cash top-ups at the Harare counter, posted to the ledger.
 4. A timed Harare vehicle auction with staggered ends (72 hours by default, `--hours`) and 10 vehicles. Each goes through intake, vehicle details, a `vehicle-v1` inspection report with 38 photos in the standard roles plus video, publication, and the listing-readiness gate.

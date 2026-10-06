@@ -122,7 +122,7 @@ describe.skipIf(!DB_TESTS_ENABLED)('bidding service against PostgreSQL', () => {
     expect(joined.decision).toEqual({ status: 'pending_review', reasons: ['linked_to_seller'] });
     // A reviewer approves (they may sell other lots and bid on some); the lot-level bar still holds.
     await t.db.tx({ type: 'staff', id: staff, name: 'Reviewer', reason: 'Seller may bid on other sellers’ lots' }, (c) =>
-      c.query(`UPDATE registration.registration SET status = 'approved', decided_by_type = 'staff', decided_by = $2, decided_at = now() WHERE id = $1`, [joined.registrationId, staff]),
+      c.query(`UPDATE registration.registration SET status = 'approved', decided_by_type = 'staff', decided_by = $2, decided_at = now(), decision_note = $3 WHERE id = $1`, [joined.registrationId, staff, 'Seller may bid on other sellers’ lots']),
     );
     expect(await bid(seller, 30_000n)).toMatchObject({ accepted: false, reason: 'seller_linked' });
   });

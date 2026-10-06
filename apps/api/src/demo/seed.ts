@@ -51,6 +51,7 @@ interface DemoPerson {
 const PEOPLE: DemoPerson[] = [
   { key: 'staff', name: 'Chipo Moyo (ABC staff, demo)', phone: '+263770000101', verification: 'full', staffRole: 'ops' },
   { key: 'approver', name: 'Tawanda Ncube (ABC finance, demo)', phone: '+263770000102', verification: 'full', staffRole: 'finance' },
+  { key: 'risk', name: 'Rufaro Dube (ABC risk, demo)', phone: '+263770000103', verification: 'full', staffRole: 'risk' },
   { key: 'seller', name: 'Borrowdale Motors (demo seller)', phone: '+263770000201', verification: 'full' },
   { key: 'tendai', name: 'Tendai M.', phone: '+263770000301', verification: 'full' },
   { key: 'rudo', name: 'Rudo K.', phone: '+263770000302', verification: 'full' },

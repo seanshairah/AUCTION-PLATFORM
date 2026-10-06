@@ -358,6 +358,34 @@ export const RULES = {
         ? 'No registration needs a staff review.'
         : `A registration is reviewed by staff only for ${list(v.map((t) => REVIEW_TRIGGER_LABEL[t] ?? t))}.`,
   }),
+  'risk.bid_up_pattern': rule({
+    title: 'Review of repeated bidding on one seller\'s lots',
+    section: 'Registration and limits',
+    owner: 'risk',
+    public: false,
+    schema: z.object({ windowDays: positiveInt, minLots: positiveInt, maxWins: z.number().int().nonnegative() }).strict(),
+    describe: (v) =>
+      `Risk staff review any bidder who, in the last ${v.windowDays} days, bid on ${v.minLots} or more lots from one seller and won ` +
+      `${v.maxWins === 0 ? 'none of them' : `no more than ${v.maxWins} of them`}.`,
+  }),
+  'risk.shared_signal_pattern': rule({
+    title: 'Review of accounts bidding from one device or network',
+    section: 'Registration and limits',
+    owner: 'risk',
+    public: false,
+    schema: z
+      .object({
+        windowDays: positiveInt,
+        minAccounts: z.number().int().min(2),
+        signalTypes: z.array(z.enum(['device', 'ip_subnet', 'phone', 'national_id', 'payment_source', 'payout_destination', 'address'])).min(1),
+        ipv4PrefixLength: z.number().int().min(8).max(32),
+        ipv6PrefixLength: z.number().int().min(16).max(128),
+      })
+      .strict(),
+    describe: (v) =>
+      `Risk staff review groups of ${v.minAccounts} or more accounts that bid in the last ${v.windowDays} days and share a ` +
+      `${list(v.signalTypes.map((t) => t.replaceAll('_', ' ')))}, or bid from the same network (IPv4 /${v.ipv4PrefixLength}, IPv6 /${v.ipv6PrefixLength}).`,
+  }),
   'limit.formula': rule({
     title: 'How your bidding limit is worked out',
     section: 'Registration and limits',
@@ -556,6 +584,17 @@ export const RULES = {
     owner: 'finance',
     schema: positiveInt,
     describe: (v) => `A payment you start but do not approve on your phone is cancelled after ${v} minutes. Nothing is charged.`,
+  }),
+  'payments.reconciliation_tolerance': rule({
+    title: 'Reconciliation tolerance',
+    section: 'Paying and collecting',
+    owner: 'finance',
+    public: false,
+    schema: moneyByCurrency,
+    describe: (v) =>
+      v.USD === 0 && v.ZWG === 0
+        ? 'Gateway statements must match our records to the cent; every difference is investigated and resolved with a note.'
+        : `A difference of up to ${describeMoneyByCurrency(v)} between a gateway statement and our records can be closed by one finance officer with a note; anything larger is investigated in full.`,
   }),
   'payout.processing_hours': rule({
     title: 'When sellers are paid',
@@ -836,6 +875,14 @@ export const RULES = {
     schema: moneyByCurrency,
     describe: (v) =>
       `A staff refund, bid removal or limit change above ${describeMoneyByCurrency(v)} needs a second staff member's approval. Every override is recorded with a name and reason.`,
+  }),
+  'override.request_expiry_hours': rule({
+    title: 'Unapproved staff overrides lapse',
+    section: 'Security and overrides',
+    owner: 'risk',
+    public: false,
+    schema: positiveInt,
+    describe: (v) => `A staff override that is not approved within ${hours(v)} lapses and must be raised again.`,
   }),
   'security.payout_destination_cooling_off_hours': rule({
     title: 'Changing payout details',

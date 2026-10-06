@@ -12,6 +12,7 @@ import { VehicleService } from '@abc/vehicles';
 import { MoneyController } from './money/money.controller';
 import { SellerController } from './seller/seller.controller';
 import { ViewingsController } from './lots/viewings.controller';
+import { ADMIN_CONTROLLERS, ADMIN_PROVIDERS } from './admin';
 import { AccountController } from './bidding/account.controller';
 import { BidDesk } from './bidding/bid-desk';
 import { jsonReplacer } from './http';
@@ -62,7 +63,7 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
   const logisticsSupport = logisticsAndSupport(db, rulebook, { ...process.env, GATE_PASS_SECRET: config.gatePassSecret });
   return {
     module: ApiModule,
-    controllers: [LotsController, AuctionsController, AccountController, SystemController, MoneyController, SellerController, ViewingsController, ...logisticsSupport.controllers],
+    controllers: [LotsController, AuctionsController, AccountController, SystemController, MoneyController, SellerController, ViewingsController, ...logisticsSupport.controllers, ...ADMIN_CONTROLLERS],
     providers: [
       { provide: CONFIG, useValue: config },
       { provide: DB, useValue: db },
@@ -75,6 +76,7 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
       { provide: SELLER, useValue: new SellerService(db, rulebook) },
       { provide: VEHICLES, useValue: new VehicleService(db, rulebook) },
       ...logisticsSupport.providers,
+      ...ADMIN_PROVIDERS,
     ],
   };
 }

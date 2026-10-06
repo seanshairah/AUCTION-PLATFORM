@@ -12,6 +12,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@abc/admin": "workspace:*",
+    "@abc/analytics": "workspace:*",
     "@abc/bidding": "workspace:*",
     "@abc/catalogue": "workspace:*",
     "@abc/db": "workspace:*",

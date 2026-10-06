@@ -30,7 +30,8 @@ export type Purpose =
   | 'forfeiture_income'
   | 'tax_payable'
   | 'fx_clearing'
-  | 'suspense';
+  | 'suspense'
+  | 'write_off';
 
 export interface AccountRef {
   owner: Owner;
@@ -90,6 +91,7 @@ export const CHART: Record<Purpose, { normalSide: 'D' | 'C'; allowNegative: bool
   tax_payable: { normalSide: 'C', allowNegative: false },
   fx_clearing: { normalSide: 'D', allowNegative: true },
   suspense: { normalSide: 'D', allowNegative: true },
+  write_off: { normalSide: 'D', allowNegative: false },
 };
 
 export class UnbalancedJournalError extends Error {
@@ -491,6 +493,47 @@ export function refundToSource(p: { refundId: string; accountId: string; currenc
     lines: [
       { account: customer(p.accountId, 'wallet_available'), amountMinor: a },
       { account: gateway(p.gateway), amountMinor: -a },
+    ],
+  });
+}
+
+/**
+ * A reconciliation shortfall written off after a second person approves (docs/18 §6):
+ * the gateway will never settle money the System credited, so the clearing balance
+ * it left behind becomes an expense.
+ */
+export function reconciliationWriteOff(p: { itemId: string; gateway: string; currency: Currency; amountMinor: bigint }): JournalSpec {
+  const a = positive(p.amountMinor, 'Write-off');
+  return journal({
+    kind: 'adjustment',
+    currency: p.currency,
+    idempotencyKey: `reconciliation:${p.itemId}:write_off`,
+    description: `Reconciliation shortfall written off (${p.gateway})`,
+    referenceType: 'reconciliation_item',
+    referenceId: p.itemId,
+    lines: [
+      { account: platform('write_off'), amountMinor: a },
+      { account: gateway(p.gateway), amountMinor: -a },
+    ],
+  });
+}
+
+/**
+ * After a forfeit is reversed on appeal (docs/18 §7), the deposit is back in wallet_held
+ * with no active hold behind it; this moves it to the available balance.
+ */
+export function returnForfeitedDeposit(p: { holdId: string; accountId: string; currency: Currency; amountMinor: bigint }): JournalSpec {
+  const a = positive(p.amountMinor, 'Deposit');
+  return journal({
+    kind: 'hold_release',
+    currency: p.currency,
+    idempotencyKey: `hold:${p.holdId}:waiver_return`,
+    description: 'Forfeited deposit returned after an appeal',
+    referenceType: 'hold',
+    referenceId: p.holdId,
+    lines: [
+      { account: customer(p.accountId, 'wallet_held'), amountMinor: a },
+      { account: customer(p.accountId, 'wallet_available'), amountMinor: -a },
     ],
   });
 }
