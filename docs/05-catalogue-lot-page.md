@@ -186,11 +186,12 @@ Shown only to the signed-in bidder: leading, with their (secret) maximum; outbid
 - **Caching:** lot HTML is cached at the CDN for 30 seconds (PROPOSED). The price block updates live through the realtime channel, so a cached page never shows a stale price for long.
 - **Search** starts with PostgreSQL full-text search over title, description and category. At A19's 5,000 live lots that's enough; a dedicated search service is a later decision if needed.
 
-## 8. Saved searches and alerts
+## 8. Watch list, saved searches and alerts
 
-- A saved search stores a query (keywords, categories, branches, currency, price limit, item states, conditions) in `catalogue.saved_search`. Up to 20 per account (PROPOSED).
-- When a lot is listed, the alert job checks it with `matchesSavedSearch` and queues one message per match. Messages are deduplicated per (saved search, lot, channel) through the communications layer, using the account's channel preferences.
-- Matching rules: every keyword must appear; categories match the whole category tree (searching "Vehicles" finds sub-categories); **a price limit is only compared within its own currency**, so a US$ limit never matches a ZiG lot by conversion (tested).
+- **Watch list.** A heart on every lot card and on the lot page saves the lot to `catalogue.watch` (one row per person and lot; personal and reversible, so not audited). Watchers get the ending-soon alert as well as bidders; someone who watched but has not bid gets the watch-list version of the message (docs/16). `GET/PUT/DELETE /me/watch[/:ref]`; lot cards and the lot page carry `viewer.watching`. The account's Watching page lists live watched lots first, then the ones that closed.
+- **Saved searches.** "Save this search" on the docket stores the docket's own filter (the same query-string parameters as `GET /lots`, parsed by `apps/api/src/lots/filters.ts`) in `catalogue.saved_search`, one name per person, up to 20 per account (PROPOSED). `GET/PUT/PATCH/DELETE /me/saved-searches`.
+- **Alerts.** Lots already on the page when a search is saved are recorded as seen, so they are not news. A worker step then runs each search with alerts on, records new matches in `catalogue.saved_search_hit` and raises one `saved_search.matched` event per batch, in the same transaction: a lot is named at most once per search, however often the step runs (R4). Messages use the `saved_searches` preference category (default: app notification and email, A65).
+- Because alerts run the docket's own filter, an alert never names a lot the saved link would not show. The `matchesSavedSearch` function in `packages/catalogue` (keywords, category trees, a price limit compared only within its own currency) remains for the richer query shape this table was designed for; the web docket does not yet offer those filters.
 
 ## 9. Past realised prices
 

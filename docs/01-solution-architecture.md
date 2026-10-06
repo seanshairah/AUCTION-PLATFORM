@@ -437,9 +437,9 @@ The reference engine implements this in-process over `auction.*` and `bidding.*`
 /
 ├── apps/
 │   ├── api/            NestJS app: API and worker entrypoints, demo seed (built)
-│   ├── web/            Next.js public site + PWA (built: buyer screens)
-│   ├── admin/          Next.js admin console
-│   └── mobile/         Expo app
+│   ├── web/            Next.js public site + PWA (built: buyer, seller and account screens,
+│   │                   and the staff console under /staff)
+│   └── mobile/         Expo app (not built)
 ├── packages/
 │   ├── domain/         Money, Currency, rule keys, lot states, shared types
 │   ├── quote/          QuoteService pure function (used by API and for offline preview)
@@ -453,7 +453,7 @@ The reference engine implements this in-process over `auction.*` and `bidding.*`
 └── infra/              Terraform, Docker, CI workflows
 ```
 
-Phase 1 added the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). Phase 2 added `packages/engine` (reference bidding engine) and `packages/catalogue` (listing readiness, structured data, saved searches). Phase 3 added the database-backed modules `packages/db`, `ledger`, `limits`, `payments`, `bidding` and `settlement`, each owning its schema as described in §4. Phase 4 added `packages/seller` and `packages/vehicles`. After Phase 4, `apps/api` (NestJS API, worker, demo seed) and `apps/web` (Next.js buyer screens) wrapped these modules, and `db/migrations/` started ([14](14-apps-and-environments.md)). The admin console and mobile app come later; realtime push is not built yet (the web app refreshes after each action).
+Phase 1 added the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). Phase 2 added `packages/engine` (reference bidding engine) and `packages/catalogue` (listing readiness, structured data, saved searches). Phase 3 added the database-backed modules `packages/db`, `ledger`, `limits`, `payments`, `bidding` and `settlement`, each owning its schema as described in §4. Phase 4 added `packages/seller` and `packages/vehicles`. After Phase 4, `apps/api` (NestJS API, worker, demo seed) and `apps/web` (Next.js buyer screens) wrapped these modules, and `db/migrations/` started ([14](14-apps-and-environments.md)). Phase 5 added `packages/logistics`, `comms`, `identity`, `support`, `admin` and `analytics`. The admin console was planned as a separate `apps/admin`; it lives in `apps/web` under `/staff` instead, with its own layout and no public chrome, because it shares the design system, the session and the API rewrite, and a second Next.js app would only duplicate them ([18 §11a](18-admin-operations.md#11a-the-console-appsweb-staff)). The mobile app comes later; realtime push is not built yet (lot pages poll a small live endpoint every 5 seconds and refresh after each action).
 
 ## 10. Environments and delivery
 

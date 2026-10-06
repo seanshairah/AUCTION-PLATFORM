@@ -33,14 +33,14 @@ Statements are tagged **CONFIRMED** (stated by the blueprint about ABC), **BENCH
 | 10 | [Payments integration](docs/09-payments.md) + [`packages/payments`](packages/payments/src) | 3 Money | Done (Paynow adapter unverified: A32) |
 | 11 | [Registration and limits](docs/10-registration-limits.md) + [`packages/limits`](packages/limits/src) | 3 Money | Done |
 | 12 | [Close and settlement](docs/11-close-settlement.md) + [`packages/settlement`](packages/settlement/src) | 3 Money | Done |
-| 13 | [Seller portal](docs/12-seller-portal.md) + [`packages/seller`](packages/seller/src) | 4 Supply | Ready for review |
-| 14 | [Vehicle module](docs/13-vehicle-module.md) + [`packages/vehicles`](packages/vehicles/src) | 4 Supply | Ready for review |
-| 15 | Logistics module | 5 Reach | Not started |
-| 16 | Communications layer | 5 Reach | Not started |
-| 17 | Support and disputes | 5 Reach | Not started |
-| 18 | Admin and operations console | 5 Reach | Not started |
-| 19 | Analytics | 5 Reach (instrumented from Phase 1) | Not started |
-| — | [Apps and environments](docs/14-apps-and-environments.md): API, worker, web, migrations, demo data | After Phase 4 | Ready for review (design provisional) |
+| 13 | [Seller portal](docs/12-seller-portal.md) + [`packages/seller`](packages/seller/src) | 4 Supply | Done |
+| 14 | [Vehicle module](docs/13-vehicle-module.md) + [`packages/vehicles`](packages/vehicles/src) | 4 Supply | Done |
+| 15 | [Logistics module](docs/15-logistics.md) + [`packages/logistics`](packages/logistics/src) | 5 Reach | Done |
+| 16 | [Communications layer](docs/16-communications.md) + [`packages/comms`](packages/comms/src) + [`packages/identity`](packages/identity/src) | 5 Reach | Done (WhatsApp and SMS adapters unverified: A43, A44) |
+| 17 | [Support and disputes](docs/17-support-disputes.md) + [`packages/support`](packages/support/src) | 5 Reach | Done |
+| 18 | [Admin and operations console](docs/18-admin-operations.md) + [`packages/admin`](packages/admin/src) + the [`/staff` console](apps/web/app/staff) | 5 Reach | Done (production staff sign-in: A66) |
+| 19 | [Analytics](docs/19-analytics.md) + [`packages/analytics`](packages/analytics/src) | 5 Reach (instrumented from Phase 1) | Done |
+| — | [Apps and environments](docs/14-apps-and-environments.md): API, worker, web (buyer, seller and staff screens), migrations, demo data | After Phase 4 | Done |
 
 ## Repository layout
 
@@ -63,8 +63,14 @@ packages/bidding    bidding service: server checks, engine under the lot lock, b
 packages/settlement invoices at close, one-tap payment, QR gate pass, release, payouts, reminders, default ladder
 packages/seller     consignments, e-signed consignment note, valuation, live bids view, statements, bulk upload, WhatsApp intake
 packages/vehicles   inspection checklist and reports, gross-inaccuracy check, viewing slots, title tracker, towing partners
-apps/api            NestJS API over the packages, the worker (closing, invoicing, reminders) and the demo seed
-apps/web            Next.js buyer screens: auctions dashboard, lot page with the commit screen, my bids, wallet, fees and rules
+packages/logistics  collection slots, storage charges at the gate, courier delivery
+packages/comms      outbox dispatcher, templates, channels and fallback, preferences, in-app feed, WhatsApp intake
+packages/identity   sign-in by one-time code
+packages/support    tickets with deadlines, not-as-described claims judged against the inspection report
+packages/admin      staff permissions, two-person overrides, rule set publication, risk, reconciliation, defaults, scheduling
+packages/analytics  blueprint §9 measures and frozen baselines
+apps/api            NestJS API over the packages, the worker (closing, invoicing, reminders, messages, alerts) and the demo seed
+apps/web            Next.js: docket, lot page with the commit screen, account (bids, watching, purchases, wallet, selling, support), and the /staff console
 db/migrations       forward-only migrations for long-lived databases (schema.sql stays canonical)
 ```
 
@@ -88,9 +94,9 @@ Copy [`.env.example`](.env.example) to `.env` (untracked) and set `DATABASE_URL`
 pnpm db:migrate                       # baseline (schema + seed) on an empty database, then db/migrations
 pnpm db:rulebook                      # load the initial rule set as a draft
 pnpm demo:seed                        # development/staging only: demo vehicle auction (A41)
-pnpm --filter @abc/api start          # API on :4000  (DEMO_SIGN_IN=1 for the demo bidders, A42)
+pnpm --filter @abc/api start          # API on :4000  (DEMO_SIGN_IN=1 for the demo bidders and staff, A42)
 pnpm --filter @abc/api worker         # closes lots, issues invoices, queues reminders
-pnpm --filter @abc/web dev            # web on :3000
+pnpm --filter @abc/web dev            # web on :3000; staff console at /staff
 pnpm db:reset --confirm <database>    # drop every System schema (removes demo data; refused in production)
 ```
 

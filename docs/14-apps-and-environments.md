@@ -114,6 +114,8 @@ Removing demo data. The ledger and audit log are append-only, so rows cannot be 
 | Viewing | on the lot page | Book or cancel a 30-minute slot |
 | Top up | `/account/wallet` | Amount, method (EcoCash, OneMoney, InnBucks, ZimSwitch, card) and phone; waits for the gateway's confirmation |
 | Sell, Help, Photo credits | `/sell`, `/help`, `/credits` | Consignor page; plain answers; licences for the demo photos |
+| Watching | `/account/watching` | Watched lots (live first, then closed) and saved searches with match previews, alerts on or off, delete. The heart on every lot card and lot page; "Save this search" on the docket (docs/05 §8) |
+| Staff console | `/staff`, `/staff/sign-in` | Today, approvals, tickets, claims, late payments, risk, reconciliation, rulebook, gate release, auctions and analytics (docs/18 §11a) |
 
 The sidebar lists only screens that exist. The current app's "Soon" screens are a blueprint finding (gap 5), so nothing here is a placeholder. The layout collapses to a top bar and single column on phones.
 

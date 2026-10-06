@@ -179,11 +179,32 @@ All under `/staff/...`, behind `StaffGuard`: a session from `session.ts` whose a
 | `GET /staff/risk/registrations`, `POST /staff/risk/registrations/:id/decision` `{decision, reason}`, `GET /staff/risk/link-clusters`, `GET /staff/risk/anomalies`, `GET /staff/risk/restricted` | §6 |
 | `GET /staff/reconciliation`, `POST /staff/reconciliation/:item/resolve` `{resolution, note, paymentId?}`, `POST /staff/reconciliation/:item/write-off` `{reason}` | §7 |
 | `GET /staff/defaults?status`, `GET /staff/defaults/:case`, `POST /staff/defaults/:case/appeals`, `POST /staff/defaults/:case/waivers` `{step, reason, appealId?}`, `POST /staff/appeals/:id/decision` `{decision, note}`; buyer: `GET /me/defaults`, `POST /me/defaults/:case/appeal` `{steps, grounds}` | §8 |
-| `POST /staff/auctions`, `POST /staff/auctions/:id/lots` `{lotIds}`, `POST /staff/auctions/:id/open` | §9 |
+| `GET /staff/me` | The signed-in staff member, their roles and the permissions those roles hold (the console hides what a role cannot open) |
+| `GET /staff/auctions`, `GET /staff/lots/offerable`, `POST /staff/auctions`, `POST /staff/auctions/:id/lots` `{lotIds}`, `POST /staff/auctions/:id/open` | §9: the scheduling board and the lots that can still be offered |
 | `GET /staff/dashboard?branch` | §10 |
 | `GET /staff/analytics/...` | [19 §9](19-analytics.md#9-api) |
 
-The demo seed now adds a risk staff member, alongside the ops and finance ones, so every console screen can be shown in the demo environment. The worker lapses unapproved overrides and retires superseded rule sets on every tick.
+The demo seed adds ops, finance, risk, support and admin staff members, a WhatsApp ticket and a limit increase waiting for a second person, so every console screen has real work to show in the demo environment. The worker lapses unapproved overrides and retires superseded rule sets on every tick.
+
+## 11a. The console (apps/web `/staff`)
+
+A separate area of the web app with its own night sidebar, so staff never mistake it for the public site. `/staff/sign-in` offers the demo staff members where demo sign-in is on (A66); every other `/staff` page redirects there without a staff session. The sidebar lists only the screens the role can open (`GET /staff/me`); the API checks every action again.
+
+| Screen | Path | What it does |
+|---|---|---|
+| Today | `/staff` | KPI band (live auctions, closing today, unpaid invoices, approvals waiting for you, payouts due), closing-today table with live countdowns, approvals waiting, unpaid invoices by age (an aging strip plus the table), auctions, viewings, overdue titles (§10) |
+| Approvals | `/staff/approvals` | Override requests by status. Each shows the amount, what it will do and the reason, and a two-step sign-off rail: raised by, then the second person. The requester sees "someone else must approve"; a role without the kind's approve permission sees why it cannot; the "waiting for you" count only counts what you may approve (§4) |
+| Tickets | `/staff/tickets` | Inbox with reply-by status per ticket, a thread view, "Take it" and reply (docs/17) |
+| Claims | `/staff/claims` | Claims with listed versus claimed condition, evidence count, the report assessment, take it, and a decision form. A refund that needs a second person turns into "Ask finance to approve" (docs/17) |
+| Late payments | `/staff/defaults` | Cases with the steps applied, appeals, decide appeal, waive a step (§8) |
+| Risk | `/staff/risk` | Registrations for review with reasons, linked accounts and history; approve or reject with a reason; link clusters, anomalies, restricted accounts (§6) |
+| Reconciliation | `/staff/money` | Exceptions with statement, system and difference; resolve, mark as gateway error, raise a write-off for a second person (§7) |
+| Rulebook | `/staff/rulebook` | Rule sets, the selected draft's errors and warnings with an acknowledgement progress bar, acknowledge one or all remaining with a written reason (one audit row per warning), then approve and publish from a date; tax rates with "Request activation" (§5) |
+| Gate release | `/staff/gate` | Scans the QR pass with the device camera where the browser has `BarcodeDetector`, or from a USB scanner or pasted text; a full-height verdict: release, or do not release with the reason and any storage due (docs/15) |
+| Auctions | `/staff/auctions` | All auctions with status, lots and bids; open a scheduled auction; schedule a new one with a lot picker that reports each lot's readiness blockers (§9) |
+| Analytics | `/staff/analytics` | Period and branch filter in one row; sell-through as the one hero figure; timing tiles; sell-through by category (bars) and realised hammer prices (low–high range with the median), each with a hover tooltip and a table view; paid in the app; revenue; freeze a baseline (docs/19) |
+
+Charts follow one series colour (`#4b48a8`, inside the lightness band and above 3:1 against the surface, checked with the dataviz validator), 20 px bars with 4 px rounded data ends on a hairline grid, and text in text colours only.
 
 ## 12. Evidence
 
@@ -202,6 +223,7 @@ The demo seed now adds a risk staff member, alongside the ops and finance ones, 
 | Reconciliation queue: tolerance refused, gateway error resolved once, surplus cannot be written off, shortfall written off by a second person to `write_off` | same |
 | Auction created once per code; unready lots refused with blockers; staggered ends; opened with the rule set pinned; dashboard closing today, by branch | same |
 | Override, append-only, transition, lapse, acknowledgement, single-effective-version, tax activation, write-off account, registration decision, waiver and reconciliation rules | `db/tests/invariants.sql` (33 checks added, prefixed "Admin") |
+| Staff roles and permissions (`/staff/me`), the scheduling board, offerable lots refused to support, and the seeded queues | `apps/api/src/api.test.ts` |
 | Staff sign-in and guard; limit override across two people over HTTP; rule set publication over HTTP; risk, reconciliation, defaults, auctions and dashboard endpoints | `apps/api/src/admin.test.ts` |
 
 ## 13. Open items

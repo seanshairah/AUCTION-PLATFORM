@@ -152,11 +152,30 @@ jobs:
           pnpm --filter @abc/web start > web.log 2>&1 &
           for i in $(seq 1 60); do curl -sf localhost:4000/health > /dev/null && curl -sf localhost:3000/auctions > /dev/null && break; sleep 1; done
           ref=$(curl -sf "localhost:4000/lots?q=Hilux" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).lots[0].ref))')
-          for path in /auctions "/auctions?bodyStyle=pickup" "/lots/$ref" /rules /sign-in; do
+          for path in /auctions "/auctions?bodyStyle=pickup" "/lots/$ref" /rules /sign-in /staff/sign-in; do
             code=$(curl -s -o page.html -w '%{http_code}' "localhost:3000$path")
             echo "$path -> $code"; test "$code" = 200
           done
           grep -q "Inspection report" <(curl -sf "localhost:3000/lots/$ref")
+      - name: Request the account and staff screens as demo users
+        shell: bash
+        run: |
+          pick() { node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const a=JSON.parse(s).find(x=>eval(process.argv[1]));console.log(a.id)})' "$1"; }
+          bidder=$(curl -sf localhost:4000/session/demo-accounts | pick 'x.name.startsWith("Farai")')
+          curl -sf -c bidder.jar -H 'content-type: application/json' -d "{\"accountId\":\"$bidder\"}" localhost:3000/api/session/demo > /dev/null
+          for path in /account/bids /account/watching /account/purchases /account/wallet /account/support /account/preferences; do
+            code=$(curl -s -b bidder.jar -o page.html -w '%{http_code}' "localhost:3000$path")
+            echo "$path -> $code"; test "$code" = 200
+          done
+          admin=$(curl -sf localhost:4000/session/demo-staff-accounts | pick 'x.roles.includes("admin")')
+          curl -sf -c staff.jar -H 'content-type: application/json' -d "{\"accountId\":\"$admin\"}" localhost:3000/api/session/demo-staff > /dev/null
+          for path in /staff /staff/approvals /staff/tickets /staff/claims /staff/defaults /staff/risk /staff/money /staff/rulebook /staff/gate /staff/auctions /staff/analytics; do
+            code=$(curl -s -b staff.jar -o page.html -w '%{http_code}' "localhost:3000$path")
+            echo "$path -> $code"; test "$code" = 200
+          done
+          # The seeded limit increase waits for a second person, and a bidder cannot open the console.
+          grep -q "Approve and apply" <(curl -sf -b staff.jar localhost:3000/staff/approvals)
+          test "$(curl -s -b bidder.jar -o /dev/null -w '%{http_code}' localhost:3000/staff)" = 307
       - name: Logs
         if: always()
         run: tail -n 50 api.log web.log || true
