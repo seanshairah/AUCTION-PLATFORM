@@ -667,6 +667,7 @@ CREATE TABLE seller.consignment (
   branch_code             text REFERENCES core.branch (code),
   commission_rule_version uuid REFERENCES rulebook.rule_set_version (id),
   note_object_key         text,                  -- e-signed consignment note
+  note_sha256             bytea,                 -- hash of the exact note text the seller signed
   signed_at               timestamptz,
   signature_reference     text,
   advance_minor           bigint CHECK (advance_minor IS NULL OR advance_minor > 0),
@@ -675,7 +676,20 @@ CREATE TABLE seller.consignment (
   CHECK ((consignment_type = 'advance') = (advance_minor IS NOT NULL)),
   CHECK ((advance_minor IS NULL) = (advance_currency IS NULL)),
   CHECK (status NOT IN ('signed', 'active', 'closed')
-         OR (signed_at IS NOT NULL AND note_object_key IS NOT NULL AND commission_rule_version IS NOT NULL))
+         OR (signed_at IS NOT NULL AND note_object_key IS NOT NULL AND note_sha256 IS NOT NULL
+             AND commission_rule_version IS NOT NULL))
+);
+
+-- Institutional bulk uploads (banks, insurers, customs sales): one row per file.
+CREATE TABLE seller.bulk_batch (
+  id                 uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  seller_account_id  uuid NOT NULL REFERENCES identity.account (id),
+  external_batch_ref text NOT NULL,
+  consignment_id     uuid NOT NULL REFERENCES seller.consignment (id),
+  row_count          integer NOT NULL CHECK (row_count > 0),
+  created_lot_count  integer NOT NULL CHECK (created_lot_count >= 0),
+  created_at         timestamptz NOT NULL DEFAULT clock_timestamp(),
+  UNIQUE (seller_account_id, external_batch_ref)
 );
 
 CREATE TRIGGER consignment_audit AFTER INSERT OR UPDATE ON seller.consignment
@@ -703,9 +717,11 @@ CREATE TABLE catalogue.lot (
   estimate_high_minor    bigint,
   state                  text NOT NULL DEFAULT 'draft',
   current_auction_lot_id uuid,                   -- FK added after auction.auction_lot
+  external_ref           text,                   -- institution's own lot number (bulk upload, deliverable 13)
   created_at             timestamptz NOT NULL DEFAULT clock_timestamp(),
   FOREIGN KEY (category_code, is_vehicle) REFERENCES catalogue.category (code, is_vehicle),
   UNIQUE (id, settlement_currency),
+  UNIQUE (seller_account_id, external_ref),      -- re-uploading the same file never duplicates lots
   CHECK (estimate_low_minor IS NULL OR estimate_high_minor IS NULL OR estimate_low_minor <= estimate_high_minor)
 );
 CREATE INDEX lot_state_idx ON catalogue.lot (state);
@@ -842,6 +858,9 @@ CREATE TABLE catalogue.inspection_report (
   inspected_at      timestamptz NOT NULL,
   chassis_verified  boolean NOT NULL,
   engine_verified   boolean NOT NULL,
+  chassis_number_seen text,                      -- as read off the vehicle by the inspector
+  engine_number_seen  text,
+  odometer_km       integer CHECK (odometer_km IS NULL OR odometer_km >= 0),
   items             jsonb NOT NULL,              -- checklist answers keyed by checklist item
   photo_count       integer NOT NULL CHECK (photo_count >= 0),
   has_video         boolean NOT NULL,
@@ -849,6 +868,72 @@ CREATE TABLE catalogue.inspection_report (
   published_at      timestamptz
 );
 CREATE INDEX inspection_report_lot_idx ON catalogue.inspection_report (lot_id);
+
+-- A published inspection report is evidence for the gross-inaccuracy remedy
+-- (deliverable 14): it is never edited. A re-inspection is a new report.
+CREATE FUNCTION catalogue.guard_inspection_report() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    IF OLD.published_at IS NOT NULL THEN
+      RAISE EXCEPTION 'published inspection reports are never deleted' USING ERRCODE = 'restrict_violation';
+    END IF;
+    RETURN OLD;
+  END IF;
+  IF OLD.published_at IS NOT NULL THEN
+    RAISE EXCEPTION 'inspection report % is published and cannot change; file a new report', OLD.id
+      USING ERRCODE = 'restrict_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER inspection_report_guard BEFORE UPDATE OR DELETE ON catalogue.inspection_report
+  FOR EACH ROW EXECUTE FUNCTION catalogue.guard_inspection_report();
+CREATE TRIGGER inspection_report_audit AFTER INSERT OR UPDATE ON catalogue.inspection_report
+  FOR EACH ROW EXECUTE FUNCTION audit.log_state_change('published_at');
+
+-- Viewing slots replace arranging viewings by phone and email (blueprint module 8).
+CREATE TABLE catalogue.viewing_slot (
+  id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  branch_code text NOT NULL REFERENCES core.branch (code),
+  lot_id      uuid REFERENCES catalogue.lot (id),   -- NULL: a general viewing window for the branch
+  starts_at   timestamptz NOT NULL,
+  ends_at     timestamptz NOT NULL,
+  capacity    integer NOT NULL CHECK (capacity > 0),
+  CHECK (ends_at > starts_at)
+);
+CREATE INDEX viewing_slot_lot_idx ON catalogue.viewing_slot (lot_id, starts_at);
+
+CREATE TABLE catalogue.viewing_booking (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  slot_id    uuid NOT NULL REFERENCES catalogue.viewing_slot (id),
+  account_id uuid NOT NULL REFERENCES identity.account (id),
+  status     text NOT NULL DEFAULT 'booked' CHECK (status IN ('booked', 'cancelled', 'attended', 'no_show')),
+  booked_at  timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+CREATE UNIQUE INDEX viewing_booking_once_idx ON catalogue.viewing_booking (slot_id, account_id) WHERE status <> 'cancelled';
+
+-- A slot never holds more active bookings than its capacity (checked under a row lock on the slot).
+CREATE FUNCTION catalogue.guard_viewing_capacity() RETURNS trigger
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_capacity integer;
+  v_booked   integer;
+BEGIN
+  IF NEW.status <> 'booked' THEN
+    RETURN NEW;
+  END IF;
+  SELECT capacity INTO v_capacity FROM catalogue.viewing_slot WHERE id = NEW.slot_id FOR UPDATE;
+  SELECT count(*) INTO v_booked FROM catalogue.viewing_booking
+   WHERE slot_id = NEW.slot_id AND status = 'booked' AND id <> NEW.id;
+  IF v_booked >= v_capacity THEN
+    RAISE EXCEPTION 'viewing slot % is full', NEW.slot_id USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER viewing_booking_capacity BEFORE INSERT OR UPDATE OF status ON catalogue.viewing_booking
+  FOR EACH ROW EXECUTE FUNCTION catalogue.guard_viewing_capacity();
 
 CREATE TABLE catalogue.saved_search (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1232,6 +1317,18 @@ CREATE TABLE payment.reconciliation_item (
 -- logistics: collections, QR passes, slots, vehicle title cases
 -- -----------------------------------------------------------------------------
 
+-- Towing and courier partners listed to buyers (blueprint module 8: "Towing partners listed").
+CREATE TABLE logistics.partner (
+  id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  kind       text NOT NULL CHECK (kind IN ('towing', 'courier')),
+  name       text NOT NULL,
+  phone_e164 text NOT NULL CHECK (phone_e164 ~ '^\+[1-9][0-9]{6,14}$'),
+  branches   text[] NOT NULL CHECK (cardinality(branches) > 0),
+  notes      text,
+  active     boolean NOT NULL DEFAULT true,
+  UNIQUE (kind, name)
+);
+
 CREATE TABLE logistics.collection_slot (
   id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   branch_code text NOT NULL REFERENCES core.branch (code),
@@ -1309,6 +1406,20 @@ CREATE TABLE logistics.title_step (
   CHECK (status <> 'done' OR (evidence_object_key IS NOT NULL AND completed_by IS NOT NULL AND completed_at IS NOT NULL))
 );
 
+-- Title steps happen in order: police clearance, then ZIMRA, then change of ownership.
+CREATE FUNCTION logistics.guard_title_step_order() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF NEW.status = 'done' AND (TG_OP = 'INSERT' OR OLD.status IS DISTINCT FROM 'done') AND EXISTS (
+       SELECT 1 FROM logistics.title_step
+        WHERE title_case_id = NEW.title_case_id AND sort < NEW.sort AND status <> 'done') THEN
+    RAISE EXCEPTION 'title step % cannot be done before the earlier steps', NEW.step USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER title_step_order BEFORE INSERT OR UPDATE OF status ON logistics.title_step
+  FOR EACH ROW EXECUTE FUNCTION logistics.guard_title_step_order();
 CREATE TRIGGER title_step_audit AFTER INSERT OR UPDATE ON logistics.title_step
   FOR EACH ROW EXECUTE FUNCTION audit.log_state_change('status');
 

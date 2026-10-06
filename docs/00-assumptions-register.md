@@ -167,6 +167,10 @@ Each open item has a **safe default**: what the System does until someone answer
 | A34 | Deposits count **account-wide** per currency towards the spending limit, wherever they were placed; deposit-required auctions still need their own minimum deposit to join | PROPOSED | As implemented in `RegistrationService.limit` ([10 §4](10-registration-limits.md#4-limits)) | ABC Risk |
 | A35 | Every payment from outside lands in the wallet as a top-up; invoices are paid from the wallet. An "EcoCash invoice payment" is top-up then pay, in one flow on the phone | PROPOSED | One crediting path ([09 §2](09-payments.md#2-one-path-for-money-in)) | Product owner |
 | A36 | Seller payouts are sent by finance (bank or mobile money) and marked paid in the System, which posts the ledger journal; gateway payout APIs are a later automation | PROPOSED | Manual payout marking ([08 §7](08-wallet-ledger.md#7-payouts)) | ABC Finance |
+| A37 | Vehicle inspection checklist `vehicle-v1` (29 items, 11 marked material) | PROPOSED | As in [13 §3](13-vehicle-module.md#3-inspection-report-on-a-standard-checklist); versioned so ABC can revise it | ABC Vehicle Sales |
+| A38 | A gross inaccuracy is a differing chassis or engine number, an odometer off by more than 10 %, or a failing material item that the report called fine | PROPOSED | Rule `vehicle.odometer_tolerance_bp = 1000` ([13 §4](13-vehicle-module.md#4-the-gross-inaccuracy-remedy)) | ABC Commercial / counsel |
+| A39 | No commission consignment note can be signed until commission is published (a consequence of Q3), so no seller signs "to be confirmed" terms | PROPOSED | `CommissionNotPublishedError` ([12 §3](12-seller-portal.md#3-consigning-and-the-consignment-note)) | ABC Commercial |
+| A40 | Valuation ranges are the middle half (25th to 75th percentile) of at least 5 comparable sales in the last 12 months | PROPOSED | Rule `seller.valuation_min_comparables = 5` ([12 §4](12-seller-portal.md#4-valuation-range)) | ABC Operations |
 | A31 | Until the registration and limits service ships (Phase 3), the commit screen's limit line uses whatever limit ABC's current system can provide through the integration; the server still enforces a limit | ASSUMPTION | Limit line hidden if no source is available ([06 §3](06-commit-screen.md#3-behaviour-as-the-bidder-types)) | Tech lead / ABC IT |
 
 ---
@@ -192,6 +196,7 @@ The product owner approved these resolutions on 2026-10-06.
 | Date | Change |
 |---|---|
 | 2026-10-06 | Register created. All defaults adopted by the product owner. Q1–Q10, A12, A15, A16 remain open with their owners |
+| 2026-10-06 | Phase 4: added A37–A40 with the seller portal and vehicle module |
 | 2026-10-06 | Phase 3: corrected A20 (invoices use the auction's pinned rule set, so the bill always matches the commit screen); added A32–A36 |
 | 2026-10-06 | Phase 2: added A30–A31 with the bidding engine and commit screen specs |
 | 2026-10-06 | Phase 1: added A23–A29 found while transcribing the rule set ([03 §10](03-rulebook-service.md#10-the-initial-rule-set)). Every placeholder is tagged in `rulebook/initial-rule-set.json` and must be acknowledged before a rule set is published |

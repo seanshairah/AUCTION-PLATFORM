@@ -451,7 +451,7 @@ The reference engine implements this in-process over `auction.*` and `bidding.*`
 └── infra/              Terraform, Docker, CI workflows
 ```
 
-Phase 1 added the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). Phase 2 added `packages/engine` (reference bidding engine) and `packages/catalogue` (listing readiness, structured data, saved searches). Phase 3 added the database-backed modules `packages/db`, `ledger`, `limits`, `payments`, `bidding` and `settlement`, each owning its schema as described in §4. The `apps/` (API, worker, web, admin, mobile) wrap these modules next.
+Phase 1 added the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). Phase 2 added `packages/engine` (reference bidding engine) and `packages/catalogue` (listing readiness, structured data, saved searches). Phase 3 added the database-backed modules `packages/db`, `ledger`, `limits`, `payments`, `bidding` and `settlement`, each owning its schema as described in §4. Phase 4 added `packages/seller` and `packages/vehicles`. The `apps/` (API, worker, web, admin, mobile) wrap these modules next.
 
 ## 10. Environments and delivery
 

@@ -29,12 +29,12 @@ Statements are tagged **CONFIRMED** (stated by the blueprint about ABC), **BENCH
 | 6 | [Lot page and catalogue](docs/05-catalogue-lot-page.md) + [`packages/catalogue`](packages/catalogue/src) | 2 Informed bids | Done |
 | 7 | [Commit screen](docs/06-commit-screen.md) + `commitPreview` in [`packages/quote`](packages/quote/src/commit.ts) | 2 Informed bids | Done |
 | 8 | [Bidding engine integration](docs/07-bidding-engine.md) + [`packages/engine`](packages/engine/src) + [`packages/bidding`](packages/bidding/src) | 2 Informed bids | Done (bidding service persisted in Phase 3) |
-| 9 | [Wallet and ledger](docs/08-wallet-ledger.md) + [`packages/ledger`](packages/ledger/src) | 3 Money | Ready for review |
-| 10 | [Payments integration](docs/09-payments.md) + [`packages/payments`](packages/payments/src) | 3 Money | Ready for review (Paynow adapter unverified: A32) |
-| 11 | [Registration and limits](docs/10-registration-limits.md) + [`packages/limits`](packages/limits/src) | 3 Money | Ready for review |
-| 12 | [Close and settlement](docs/11-close-settlement.md) + [`packages/settlement`](packages/settlement/src) | 3 Money | Ready for review |
-| 13 | Seller portal | 4 Supply | Not started |
-| 14 | Vehicle module | 4 Supply | Not started |
+| 9 | [Wallet and ledger](docs/08-wallet-ledger.md) + [`packages/ledger`](packages/ledger/src) | 3 Money | Done |
+| 10 | [Payments integration](docs/09-payments.md) + [`packages/payments`](packages/payments/src) | 3 Money | Done (Paynow adapter unverified: A32) |
+| 11 | [Registration and limits](docs/10-registration-limits.md) + [`packages/limits`](packages/limits/src) | 3 Money | Done |
+| 12 | [Close and settlement](docs/11-close-settlement.md) + [`packages/settlement`](packages/settlement/src) | 3 Money | Done |
+| 13 | [Seller portal](docs/12-seller-portal.md) + [`packages/seller`](packages/seller/src) | 4 Supply | Ready for review |
+| 14 | [Vehicle module](docs/13-vehicle-module.md) + [`packages/vehicles`](packages/vehicles/src) | 4 Supply | Ready for review |
 | 15 | Logistics module | 5 Reach | Not started |
 | 16 | Communications layer | 5 Reach | Not started |
 | 17 | Support and disputes | 5 Reach | Not started |
@@ -60,6 +60,8 @@ packages/limits     spending limits, exposure, one-tap registration with deposit
 packages/payments   gateway interface and routing, payment service, reconciliation, Paynow (unverified), fake gateway
 packages/bidding    bidding service: server checks, engine under the lot lock, bid log, closing
 packages/settlement invoices at close, one-tap payment, QR gate pass, release, payouts, reminders, default ladder
+packages/seller     consignments, e-signed consignment note, valuation, live bids view, statements, bulk upload, WhatsApp intake
+packages/vehicles   inspection checklist and reports, gross-inaccuracy check, viewing slots, title tracker, towing partners
 ```
 
 ## Working on it

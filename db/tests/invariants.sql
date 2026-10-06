@@ -507,6 +507,58 @@ SELECT test.expect_error('National ID numbers are unique across accounts', ARRAY
      WHERE id = '00000000-0000-0000-0000-0000000000b2'$$],
   'duplicate key');
 
+-- -----------------------------------------------------------------------------
+-- Phase 4: supply side
+-- -----------------------------------------------------------------------------
+
+SELECT test.expect_error('Title steps happen in order: CVR cannot be done before ZRP and ZIMRA', ARRAY[
+  $$INSERT INTO catalogue.lot (id, lot_ref, consignment_id, seller_account_id, category_code, is_vehicle, title, description,
+                               item_state, condition, location_branch, settlement_currency, tax_class, starting_bid_minor)
+    VALUES ('00000000-0000-0000-0000-0000000001a9', 'HRE-TEST-V9', '00000000-0000-0000-0000-0000000000d1',
+            '00000000-0000-0000-0000-0000000000a1', 'vehicles', true, 'Truck', 'Truck', 'used', 'as_is', 'HRE', 'USD', 'vehicle_standard', 1)$$,
+  $$INSERT INTO logistics.title_case (id, lot_id, buyer_account_id, deadline_at)
+    VALUES ('00000000-0000-0000-0000-0000000004a9', '00000000-0000-0000-0000-0000000001a9', '00000000-0000-0000-0000-0000000000b1', now() + interval '14 days')$$,
+  $$INSERT INTO logistics.title_step (title_case_id, step, sort, owner_party, due_at)
+    VALUES ('00000000-0000-0000-0000-0000000004a9', 'zrp_clearance', 1, 'abc', now()),
+           ('00000000-0000-0000-0000-0000000004a9', 'zimra_clearance', 2, 'abc', now()),
+           ('00000000-0000-0000-0000-0000000004a9', 'cvr_change_of_ownership', 3, 'abc', now())$$,
+  $$UPDATE logistics.title_step SET status = 'done', evidence_object_key = 'ev/cvr.pdf', completed_by = '00000000-0000-0000-0000-0000000000f1', completed_at = now()
+     WHERE title_case_id = '00000000-0000-0000-0000-0000000004a9' AND step = 'cvr_change_of_ownership'$$],
+  'before the earlier steps');
+
+SELECT test.expect_ok('A draft inspection report can be corrected before publishing', ARRAY[
+  $$INSERT INTO catalogue.inspection_report (id, lot_id, checklist_version, inspector_id, inspected_at, chassis_verified, engine_verified,
+                                             items, photo_count, has_video, summary)
+    VALUES ('00000000-0000-0000-0000-0000000009a1', '00000000-0000-0000-0000-0000000001a2', 'vehicle-v1', '00000000-0000-0000-0000-0000000000f1',
+            now(), true, true, '{}', 35, true, 'Draft')$$,
+  $$UPDATE catalogue.inspection_report SET summary = 'Corrected', published_at = now() WHERE id = '00000000-0000-0000-0000-0000000009a1'$$]);
+
+SELECT test.expect_error('A published inspection report cannot be edited', ARRAY[
+  $$UPDATE catalogue.inspection_report SET summary = 'Changed after publishing' WHERE id = '00000000-0000-0000-0000-0000000009a1'$$],
+  'cannot change');
+
+SELECT test.expect_error('A published inspection report cannot be deleted', ARRAY[
+  $$DELETE FROM catalogue.inspection_report WHERE id = '00000000-0000-0000-0000-0000000009a1'$$],
+  'never deleted');
+
+SELECT test.expect_error('A viewing slot never takes more bookings than its capacity', ARRAY[
+  $$INSERT INTO catalogue.viewing_slot (id, branch_code, starts_at, ends_at, capacity)
+    VALUES ('00000000-0000-0000-0000-0000000009b1', 'HRE', now() + interval '1 day', now() + interval '1 day 30 minutes', 1)$$,
+  $$INSERT INTO catalogue.viewing_booking (slot_id, account_id) VALUES ('00000000-0000-0000-0000-0000000009b1', '00000000-0000-0000-0000-0000000000b1')$$,
+  $$INSERT INTO catalogue.viewing_booking (slot_id, account_id) VALUES ('00000000-0000-0000-0000-0000000009b1', '00000000-0000-0000-0000-0000000000b2')$$],
+  'is full');
+
+SELECT test.expect_error('A consignment cannot be signed without the hash of the note signed', ARRAY[
+  $$UPDATE seller.consignment SET status = 'signed', signed_at = now(), note_object_key = 'notes/x.pdf',
+            commission_rule_version = '00000000-0000-0000-0000-00000000e001'
+     WHERE id = '00000000-0000-0000-0000-0000000000d1'$$],
+  'check constraint');
+
+SELECT test.expect_error('An institution''s own lot number is unique per seller (re-uploads never duplicate)', ARRAY[
+  $$UPDATE catalogue.lot SET external_ref = 'ZIMRA-0001' WHERE lot_ref = 'HRE-TEST-2'$$,
+  $$UPDATE catalogue.lot SET external_ref = 'ZIMRA-0001' WHERE lot_ref = 'HRE-TEST-1'$$],
+  'duplicate key');
+
 SELECT 'ALL INVARIANT TESTS PASSED' AS result;
 
 ROLLBACK;

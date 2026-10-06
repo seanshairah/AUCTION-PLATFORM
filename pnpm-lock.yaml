@@ -152,6 +152,31 @@ importers:
         specifier: ^4.0.0
         version: 4.6.5
 
+  packages/seller:
+    dependencies:
+      '@abc/db':
+        specifier: workspace:*
+        version: link:../db
+      '@abc/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@abc/limits':
+        specifier: workspace:*
+        version: link:../limits
+      '@abc/quote':
+        specifier: workspace:*
+        version: link:../quote
+      '@abc/rules':
+        specifier: workspace:*
+        version: link:../rules
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@abc/bidding':
+        specifier: workspace:*
+        version: link:../bidding
+
   packages/settlement:
     dependencies:
       '@abc/bidding':
@@ -178,6 +203,21 @@ importers:
       '@abc/quote':
         specifier: workspace:*
         version: link:../quote
+      '@abc/rules':
+        specifier: workspace:*
+        version: link:../rules
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
+
+  packages/vehicles:
+    dependencies:
+      '@abc/db':
+        specifier: workspace:*
+        version: link:../db
+      '@abc/domain':
+        specifier: workspace:*
+        version: link:../domain
       '@abc/rules':
         specifier: workspace:*
         version: link:../rules
