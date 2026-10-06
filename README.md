@@ -26,13 +26,13 @@ Statements are tagged **CONFIRMED** (stated by the blueprint about ABC), **BENCH
 | 3 | [Data model](docs/02-data-model.md) + [DDL](db/schema.sql) | 0 Foundations | Done |
 | 4 | [Rulebook service](docs/03-rulebook-service.md) + [initial rule set](rulebook/initial-rule-set.json) + [`packages/rules`](packages/rules/src) | 1 Fix the rules | Done |
 | 5 | [Fee and tax engine](docs/04-fee-tax-engine.md) + [`packages/quote`](packages/quote/src) | 1 Fix the rules | Done |
-| 6 | [Lot page and catalogue](docs/05-catalogue-lot-page.md) + [`packages/catalogue`](packages/catalogue/src) | 2 Informed bids | Ready for review |
-| 7 | [Commit screen](docs/06-commit-screen.md) + `commitPreview` in [`packages/quote`](packages/quote/src/commit.ts) | 2 Informed bids | Ready for review |
-| 8 | [Bidding engine integration](docs/07-bidding-engine.md) + [`packages/engine`](packages/engine/src) | 2 Informed bids | Ready for review |
-| 9 | Wallet and ledger module | 3 Money | Not started |
-| 10 | Payments integration | 3 Money | Not started |
-| 11 | Registration and limits service | 3 Money | Not started |
-| 12 | Close and settlement flow | 3 Money | Not started |
+| 6 | [Lot page and catalogue](docs/05-catalogue-lot-page.md) + [`packages/catalogue`](packages/catalogue/src) | 2 Informed bids | Done |
+| 7 | [Commit screen](docs/06-commit-screen.md) + `commitPreview` in [`packages/quote`](packages/quote/src/commit.ts) | 2 Informed bids | Done |
+| 8 | [Bidding engine integration](docs/07-bidding-engine.md) + [`packages/engine`](packages/engine/src) + [`packages/bidding`](packages/bidding/src) | 2 Informed bids | Done (bidding service persisted in Phase 3) |
+| 9 | [Wallet and ledger](docs/08-wallet-ledger.md) + [`packages/ledger`](packages/ledger/src) | 3 Money | Ready for review |
+| 10 | [Payments integration](docs/09-payments.md) + [`packages/payments`](packages/payments/src) | 3 Money | Ready for review (Paynow adapter unverified: A32) |
+| 11 | [Registration and limits](docs/10-registration-limits.md) + [`packages/limits`](packages/limits/src) | 3 Money | Ready for review |
+| 12 | [Close and settlement](docs/11-close-settlement.md) + [`packages/settlement`](packages/settlement/src) | 3 Money | Ready for review |
 | 13 | Seller portal | 4 Supply | Not started |
 | 14 | Vehicle module | 4 Supply | Not started |
 | 15 | Logistics module | 5 Reach | Not started |
@@ -54,16 +54,22 @@ packages/rules      rule registry, scope resolution, validation, increment ladde
 packages/quote      the QuoteService: all-in buyer price, seller proceeds, commit-screen preview
 packages/engine     reference bidding engine: proxy bids, soft close, reserve, closing, replay, bid history
 packages/catalogue  listing readiness (the "all-in price on every lot" gate), structured data, saved searches
+packages/db         transactions with audit actor, rulebook store, test databases and fixtures
+packages/ledger     posting recipes, the ledger write path, holds, wallets, daily reconciliation
+packages/limits     spending limits, exposure, one-tap registration with deposits
+packages/payments   gateway interface and routing, payment service, reconciliation, Paynow (unverified), fake gateway
+packages/bidding    bidding service: server checks, engine under the lot lock, bid log, closing
+packages/settlement invoices at close, one-tap payment, QR gate pass, release, payouts, reminders, default ladder
 ```
 
 ## Working on it
 
-Requires Node 22+, pnpm 10 and, for the database tests, PostgreSQL 16 reachable through the usual `PG*` environment variables.
+Requires Node 22+, pnpm 10 and, for the database tests, PostgreSQL 16 reachable through the usual `PG*` environment variables. Database integration tests run only when `PGHOST` is set (each creates and drops its own database); CI always sets it and fails if any are skipped.
 
 ```sh
 pnpm install
 pnpm typecheck
-pnpm test                 # all packages
+PGHOST=localhost PGUSER=postgres PGPASSWORD=postgres pnpm test   # all packages, including the end-to-end money path
 db/tests/run.sh           # schema + seed + invariant tests in a temporary database
 pnpm rulebook:sql | psql  # validate the initial rule set and load it as a draft version
 ```

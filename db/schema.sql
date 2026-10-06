@@ -623,8 +623,8 @@ CREATE TRIGGER hold_audit AFTER INSERT OR UPDATE ON ledger.hold
 CREATE VIEW ledger.v_wallet AS
 SELECT ba.owner_id::uuid AS account_id,
        ba.currency,
-       coalesce(sum(ba.balance_minor) FILTER (WHERE ba.purpose = 'wallet_available'), 0) AS available_minor,
-       coalesce(sum(ba.balance_minor) FILTER (WHERE ba.purpose = 'wallet_held'), 0)      AS held_minor
+       coalesce(sum(ba.balance_minor) FILTER (WHERE ba.purpose = 'wallet_available'), 0)::bigint AS available_minor,
+       coalesce(sum(ba.balance_minor) FILTER (WHERE ba.purpose = 'wallet_held'), 0)::bigint      AS held_minor
   FROM ledger.book_account ba
  WHERE ba.owner_type = 'customer'
    AND ba.purpose IN ('wallet_available', 'wallet_held')

@@ -92,6 +92,17 @@ export const DEFAULT_LADDER_STEPS = ['warning', 'deposit_forfeit', 'relist_fee',
 
 const channel = z.enum(['whatsapp', 'push', 'sms', 'email', 'in_app']);
 
+export const PAYMENT_METHODS = ['ecocash', 'onemoney', 'innbucks', 'omari', 'zimswitch', 'card', 'bank_transfer'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+/** currency → method → gateway ids in failover order. An empty list means the method is not offered. */
+export const paymentRouting = z
+  .object({
+    USD: z.partialRecord(z.enum(PAYMENT_METHODS), z.array(z.string().min(1))),
+    ZWG: z.partialRecord(z.enum(PAYMENT_METHODS), z.array(z.string().min(1))),
+  })
+  .strict();
+export type PaymentRouting = z.infer<typeof paymentRouting>;
+
 // ---------------------------------------------------------------------------
 // Plain-language helpers
 // ---------------------------------------------------------------------------
@@ -167,6 +178,16 @@ const CONDITION_LABEL: Record<string, string> = {
   incomplete: 'Incomplete',
   sealed_packing: 'Sealed Packing',
   not_working: 'Not Working',
+};
+
+const METHOD_LABEL: Record<string, string> = {
+  ecocash: 'EcoCash',
+  onemoney: 'OneMoney',
+  innbucks: 'InnBucks',
+  omari: 'Omari',
+  zimswitch: 'Zimswitch',
+  card: 'Visa or Mastercard',
+  bank_transfer: 'bank transfer',
 };
 
 const ALERT_LABEL: Record<string, string> = {
@@ -505,6 +526,44 @@ export const RULES = {
     owner: 'finance',
     schema: z.number().int().min(0).max(10_000),
     describe: (v) => (v === 0 ? 'Forfeited deposits are kept by ABC.' : `${percent(v)} of a forfeited deposit goes to the seller.`),
+  }),
+  'deposit.release_on': rule({
+    title: 'Getting your deposit back',
+    section: 'Deposits',
+    owner: 'risk',
+    schema: z.enum(['auction_settled']),
+    describe: () =>
+      'If you do not win, your deposit is released to your wallet when the auction closes. If you win, it counts towards your payment.',
+  }),
+  'payments.routing': rule({
+    title: 'Ways to pay',
+    section: 'Paying and collecting',
+    owner: 'finance',
+    schema: paymentRouting,
+    describe: (v) =>
+      (['USD', 'ZWG'] as Currency[])
+        .map((c) => {
+          const methods = Object.entries(v[c])
+            .filter(([, gateways]) => gateways && gateways.length > 0)
+            .map(([m]) => METHOD_LABEL[m] ?? m);
+          return `${c === 'USD' ? 'In USD' : 'In ZiG'}: ${methods.length ? list(methods) : 'not yet available'}`;
+        })
+        .join('. ') + '. Branch cash is also accepted at the counter.',
+  }),
+  'payments.pending_expiry_minutes': rule({
+    title: 'Unfinished payments',
+    section: 'Paying and collecting',
+    owner: 'finance',
+    schema: positiveInt,
+    describe: (v) => `A payment you start but do not approve on your phone is cancelled after ${v} minutes. Nothing is charged.`,
+  }),
+  'payout.processing_hours': rule({
+    title: 'When sellers are paid',
+    section: 'Paying and collecting',
+    owner: 'finance',
+    schema: z.number().int().nonnegative(),
+    describe: (v) =>
+      `Sellers are paid ${hours(v)} after the buyer's claim window closes, once the goods have been collected and paid for.`,
   }),
   'reserve.offer_window_hours': rule({
     title: 'Offer when the reserve is not met',

@@ -1,0 +1,17 @@
+{
+  "name": "@abc/db",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@abc/domain": "workspace:*",
+    "@abc/rules": "workspace:*",
+    "pg": "^8.23.1"
+  }
+}

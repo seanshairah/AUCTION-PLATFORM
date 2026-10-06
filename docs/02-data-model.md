@@ -100,7 +100,7 @@ erDiagram
 | `support` | Support and disputes | Disputes and evidence (tickets: deliverable 17) |
 | `comms` | Communications | Templates, messages, preferences |
 
-**Rule versions** (A20). An auction pins `rule_version_id` when it opens. Bidding in that auction (increments, soft close, limit formula) follows that version. An invoice stores the version in force **at the hammer**, and its tax lines reference the exact `tax_rate` rows used. Changing a rule mid-auction therefore never changes what a bidder was shown.
+**Rule versions** (A20). An auction pins `rule_version_id` when it opens. Bidding in that auction (increments, soft close, limit formula) follows that version. Its invoices use the **same pinned version** for fees, plus the tax rates in force **at the hammer**; each tax line references the exact `tax_rate` row used. Changing a rule mid-auction therefore never changes what a bidder was shown or billed (A20, corrected in Phase 3).
 
 ## 4. Wallet and ledger
 

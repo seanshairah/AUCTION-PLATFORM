@@ -18,7 +18,7 @@ The fee and tax engine is the **QuoteService** named in [01 §4.3](01-solution-a
 | Lot page ("about US$X all-in at the current bid") | `quoteLot` | current price | auction's pinned version, rates now |
 | Commit screen | `commitPreview` → `quoteLot` | the amount being typed | auction's pinned version, rates now |
 | Bid acceptance (server) | `quoteLot` | the bidder's maximum | same; stored on the bid (`quoted_total_minor`, `quoted_rule_version_id`) |
-| Invoice engine at the hammer | `quoteLot` | hammer price | version active at the hammer, rates effective at the hammer; frozen on the invoice |
+| Invoice engine at the hammer | `quoteLot` | hammer price | auction's pinned version, tax rates effective at the hammer; frozen on the invoice |
 | Seller commission calculator, consignment note, statements | `sellerProceeds` | estimate or hammer | same rule logic |
 
 **Acceptance test.** The buyer sees exactly what they will owe before committing, which lowers regret. Invoices are ready at the hammer instead of the next morning, which shortens time to cash.

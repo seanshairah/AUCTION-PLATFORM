@@ -211,7 +211,7 @@ quote({
   hammerMinor,    // the amount being typed, or the final hammer price
   buyer,          // for buyer-specific exemptions, if finance defines any
   delivery,       // optional: address or collection choice
-  ruleVersionId,  // pinned: the auction's version for previews, the version in force at the hammer for invoices (A20)
+  ruleVersionId,  // the auction's pinned version, for previews and invoices alike (A20)
 }) => {
   currency, lines: [{ type, base, rateBp, amount }], totalMinor, ruleVersionId
 }
@@ -263,7 +263,7 @@ sequenceDiagram
   T->>BID: lot end time reached and no extension pending
   BID->>BID: close lot, result = sold / reserve not met / unsold
   BID-->>SET: event lot.closed (sold)
-  SET->>SET: quote() with rules in force at the hammer, group lots per buyer, auction, currency
+  SET->>SET: quote() with the auction's pinned rules and tax rates at the hammer, grouped per buyer and currency
   SET->>LED: journal invoice_issued (receivable vs seller payable, tax payable, delivery)
   SET-->>COM: invoice.issued → in-app + WhatsApp, email as record
   Note over SET: reminders at 12 h and 36 h (PROPOSED), default ladder after 48 h (CONFIRMED window)
@@ -451,7 +451,7 @@ The reference engine implements this in-process over `auction.*` and `bidding.*`
 └── infra/              Terraform, Docker, CI workflows
 ```
 
-Phase 1 added the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). Phase 2 added `packages/engine` (reference bidding engine) and `packages/catalogue` (listing readiness, structured data, saved searches). The `apps/` come with the first API slices.
+Phase 1 added the pnpm workspace with `packages/domain`, `packages/rules` and `packages/quote`, plus `rulebook/` (rule set documents). Phase 2 added `packages/engine` (reference bidding engine) and `packages/catalogue` (listing readiness, structured data, saved searches). Phase 3 added the database-backed modules `packages/db`, `ledger`, `limits`, `payments`, `bidding` and `settlement`, each owning its schema as described in §4. The `apps/` (API, worker, web, admin, mobile) wrap these modules next.
 
 ## 10. Environments and delivery
 

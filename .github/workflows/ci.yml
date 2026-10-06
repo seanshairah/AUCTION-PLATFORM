@@ -33,8 +33,24 @@ jobs:
           echo "$(grep -c 'NOTICE:  PASS' test.log) checks passed"
 
   packages:
-    name: Typecheck and test packages
+    name: Typecheck and test packages (with PostgreSQL)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Database integration tests run only when PGHOST is set; CI always sets it.
+      PGHOST: localhost
+      PGUSER: postgres
+      PGPASSWORD: postgres
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -44,7 +60,10 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm test
+      - run: pnpm test 2>&1 | tee test.log
+      - name: Check no database test was skipped
+        run: |
+          if grep -E "skipped" test.log; then echo "Database tests were skipped"; exit 1; fi
 
   rulebook-load:
     name: Load the rule set into the schema
