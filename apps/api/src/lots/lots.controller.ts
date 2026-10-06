@@ -64,6 +64,13 @@ export class LotsController {
     return this.catalogue.facets();
   }
 
+  @Get(':ref/live')
+  async live(@Param('ref') ref: string, @OptionalAccount() account: SessionAccount | null) {
+    const l = await this.catalogue.live(ref, account?.id ?? null);
+    if (!l) throw new NotFoundException({ code: 'lot_not_found', message: 'We could not find that lot.' });
+    return l;
+  }
+
   @Get(':ref')
   async detail(@Param('ref') ref: string, @OptionalAccount() account: SessionAccount | null) {
     const lot = await this.catalogue.lotDetail(ref, account?.id ?? null);
@@ -96,5 +103,15 @@ export class LotsController {
     });
     if (!out) throw new NotFoundException({ code: 'lot_not_found', message: 'We could not find that lot.' });
     return out;
+  }
+}
+
+@Controller('auctions')
+export class AuctionsController {
+  constructor(@Inject(CATALOGUE) private readonly catalogue: CatalogueReader) {}
+
+  @Get()
+  list() {
+    return this.catalogue.auctions();
   }
 }

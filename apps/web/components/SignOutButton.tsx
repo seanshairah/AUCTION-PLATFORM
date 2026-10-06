@@ -1,23 +1,22 @@
 'use client';
 
-import { LogOut } from 'lucide-react';
+import { ArrowRightStartOnRectangleIcon } from '@heroicons/react/20/solid';
 import { useRouter } from 'next/navigation';
 
 export function SignOutButton() {
   const router = useRouter();
   return (
     <button
-      className="icon-btn"
-      style={{ width: 34, height: 34, border: 0 }}
-      title="Sign out"
-      aria-label="Sign out"
+      type="button"
+      className="btn sm ghost"
+      style={{ marginTop: 10 }}
       onClick={async () => {
         await fetch('/api/session/sign-out', { method: 'POST' });
-        router.push('/auctions');
+        router.push('/');
         router.refresh();
       }}
     >
-      <LogOut size={16} />
+      <ArrowRightStartOnRectangleIcon /> Sign out
     </button>
   );
 }

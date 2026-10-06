@@ -39,6 +39,7 @@ export interface LotCard {
   reserveStatus: 'no_reserve' | 'met' | 'not_met';
   inspectionSummary: string | null;
   photoCount: number;
+  cover: string | null;
   viewer: { leading: boolean } | null;
 }
 
@@ -58,7 +59,7 @@ export interface LotDetail extends Omit<LotCard, 'viewer'> {
   scheduledEndAt: string;
   closed: boolean;
   result: string;
-  media: Array<{ kind: string; role: string }>;
+  media: Array<{ kind: string; role: string; url: string }>;
   inspection: {
     publishedAt: string;
     inspectedAt: string;
@@ -127,4 +128,33 @@ export interface Preview {
 export interface Rulebook {
   versionLabel: string;
   sections: Array<{ section: string; rules: Array<{ key: string; title: string; text: string; provenance: string; overrides: Array<{ text: string }> }> }>;
+}
+
+export interface AuctionSummary {
+  id: string;
+  code: string;
+  title: string;
+  branch: { code: string; name: string; city: string };
+  status: string;
+  opensAt: string;
+  firstCloseAt: string;
+  lastCloseAt: string | null;
+  staggerSeconds: number;
+  depositRequired: boolean;
+  lots: number;
+  liveLots: number;
+  bids: number;
+  cover: string | null;
+}
+
+export interface LiveLot {
+  currentPrice: Money | null;
+  bids: number;
+  bidders: number;
+  endsAt: string;
+  extended: boolean;
+  closed: boolean;
+  reserveStatus: 'no_reserve' | 'met' | 'not_met';
+  leading: boolean | null;
+  serverTime: string;
 }

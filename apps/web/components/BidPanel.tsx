@@ -1,6 +1,6 @@
 'use client';
 
-import { CheckCircle2, Info, ShieldCheck } from 'lucide-react';
+import { CheckBadgeIcon, ExclamationTriangleIcon, InformationCircleIcon, ShieldCheckIcon } from '@heroicons/react/20/solid';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
@@ -65,92 +65,94 @@ export function BidPanel({ lot, signedIn }: { lot: LotDetail; signedIn: boolean 
 
   const now = lot.currentPrice ?? lot.startingBid;
   const quick = [lot.nextMinimum];
+  const reserve = lot.reserveStatus === 'no_reserve' ? 'No reserve' : lot.reserveStatus === 'met' ? 'Reserve met' : 'Reserve not met';
 
   return (
-    <aside className="card bid-panel" aria-label="Bid">
-      <div className="now">
-        <div>
-          <div className="price-label">{lot.currentPrice ? 'Current bid' : 'Starting bid'}</div>
-          <div className="big">{now.text}</div>
-          <div className="small muted">{lot.bids} bids · {lot.bidders} bidders</div>
+    <aside className="bid" aria-label="Bid on this lot">
+      <div className="top">
+        <div className="row between">
+          <span className="micro">{lot.currentPrice ? 'Current bid' : 'Starting bid'}</span>
+          <span className="micro">{reserve}</span>
         </div>
-        <div style={{ textAlign: 'right' }}>
-          <div className="price-label">Ends in</div>
-          <div style={{ fontSize: 16 }}><Countdown endsAt={lot.endsAt} /></div>
-          {lot.rules && <div className="small muted">Extends {Math.round(lot.rules.softCloseSeconds / 60)} min on late bids</div>}
+        <div className="p">{now.text}</div>
+        <div className="stats">
+          <div><span className="micro">Time left</span><b><Countdown endsAt={lot.endsAt} icon={false} /></b></div>
+          <div><span className="micro">Bids</span><b>{lot.bids}</b></div>
+          <div><span className="micro">Bidders</span><b>{lot.bidders}</b></div>
         </div>
       </div>
-
-      <div className="row" style={{ flexWrap: 'wrap' }}>
-        {lot.reserveStatus === 'no_reserve' && <span className="pill good">No reserve</span>}
-        {lot.reserveStatus === 'met' && <span className="pill good">Reserve met</span>}
-        {lot.reserveStatus === 'not_met' && <span className="pill muted">Reserve not met yet</span>}
-        {lot.viewer?.leading && <span className="pill good"><CheckCircle2 size={12} /> You are leading</span>}
-        {lot.viewer?.yourMax && <span className="pill info">Your maximum {lot.viewer.yourMax.text}</span>}
-      </div>
-
-      {result && <div className={`notice ${result.ok ? 'good' : 'bad'}`} role="status">{result.message}</div>}
-
-      {lot.closed ? (
-        <div className="notice info">Bidding has closed on this lot.</div>
-      ) : !signedIn ? (
-        <>
-          <AllIn lot={lot} />
-          <Link href={`/sign-in?next=/lots/${encodeURIComponent(lot.ref)}`} className="btn block lg">Sign in to bid</Link>
-        </>
-      ) : pending ? (
-        <div className="notice">Your registration for this auction is being reviewed. We will message you when you can bid.</div>
-      ) : !registered ? (
-        <>
-          <AllIn lot={lot} />
-          <JoinAuction lot={lot} />
-        </>
-      ) : step === 'enter' ? (
-        <>
-          <div className="field">
-            <label htmlFor="max">Your maximum bid</label>
-            <div className="amount-input">
-              <span className="cur">US$</span>
-              <input id="max" inputMode="decimal" autoComplete="off" placeholder={lot.nextMinimum.text.replace('US$', '')} value={typed} onChange={(e) => setTyped(e.target.value)} />
-            </div>
-            <div className="quick">
-              {quick.map((m) => (
-                <button key={m.minor} type="button" onClick={() => setTyped((Number(m.minor) / 100).toString())}>Next minimum {m.text}</button>
-              ))}
-            </div>
+      <div className="body">
+        {(lot.viewer?.leading || lot.viewer?.yourMax) && (
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            {lot.viewer?.leading ? <span className="status good"><CheckBadgeIcon /> You are leading</span> : <span className="status bad"><ExclamationTriangleIcon /> You have been outbid</span>}
+            {lot.viewer?.yourMax && <span className="chip">Your maximum <span className="mono">{lot.viewer.yourMax.text}</span></span>}
           </div>
-          {preview && preview.status !== 'empty' && (
-            <div className={preview.status === 'ok' ? '' : `notice ${preview.status === 'over_limit' ? '' : 'bad'}`}>
-              {preview.lines && (
-                <div style={{ marginBottom: preview.status === 'ok' ? 0 : 8 }}>
-                  {preview.lines.map((l) => <div key={l.type} className="kv"><span>{l.description}</span><span>{l.amount.text}</span></div>)}
-                  <div className="kv total"><span>You pay if you win at this</span><span>{preview.total!.text}</span></div>
+        )}
+        {result && <div className={`notice ${result.ok ? 'good' : 'bad'}`} role="status">{result.ok ? <CheckBadgeIcon /> : <ExclamationTriangleIcon />}<span>{result.message}</span></div>}
+
+        {lot.closed ? (
+          <div className="notice neutral"><InformationCircleIcon /><span>Bidding has closed on this lot.</span></div>
+        ) : !signedIn ? (
+          <>
+            <AllIn lot={lot} />
+            <Link href={`/sign-in?next=/lots/${encodeURIComponent(lot.ref)}`} className="btn block lg">Sign in to bid</Link>
+          </>
+        ) : pending ? (
+          <div className="notice"><InformationCircleIcon /><span>Your registration for this auction is being reviewed. We will message you when you can bid.</span></div>
+        ) : !registered ? (
+          <>
+            <AllIn lot={lot} />
+            <JoinAuction lot={lot} />
+          </>
+        ) : step === 'enter' ? (
+          <>
+            <div className="field">
+              <label htmlFor="max">Your maximum bid</label>
+              <div className="amount">
+                <span className="cur">US$</span>
+                <input id="max" inputMode="decimal" autoComplete="off" placeholder={lot.nextMinimum.text.replace('US$', '')} value={typed} onChange={(e) => setTyped(e.target.value)} />
+              </div>
+              <div className="row" style={{ flexWrap: 'wrap' }}>
+                {quick.map((m) => (
+                  <button key={m.minor} type="button" className="btn sm ghost" onClick={() => setTyped((Number(m.minor) / 100).toString())}>Next minimum <span className="mono">{m.text}</span></button>
+                ))}
+              </div>
+            </div>
+            {preview && preview.status !== 'empty' && (
+              preview.lines ? (
+                <div>
+                  <div className="lines">
+                    {preview.lines.map((l) => <div key={l.type} className="l"><span>{l.description}</span><span>{l.amount.text}</span></div>)}
+                    <div className="l total"><span>You pay if you win at this</span><span>{preview.total!.text}</span></div>
+                  </div>
+                  <p className={`small ${preview.status === 'ok' ? 'muted' : ''}`} style={{ marginTop: 8, color: preview.status === 'over_limit' ? 'var(--bad)' : undefined }}>{preview.message}</p>
                 </div>
-              )}
-              <div className={preview.status === 'ok' ? 'small muted' : 'small'}>{preview.message}</div>
+              ) : (
+                <div className="notice bad"><ExclamationTriangleIcon /><span>{preview.message}</span></div>
+              )
+            )}
+            {preview?.availableToBid && <p className="small muted">You can bid up to <span className="mono">{preview.availableToBid.text}</span> all-in across the lots you lead.</p>}
+            <button className="btn block lg" disabled={preview?.status !== 'ok'} onClick={() => setStep('confirm')}>Review bid</button>
+          </>
+        ) : (
+          <>
+            <div className="notice info">
+              <InformationCircleIcon />
+              <span><strong className="w600">Bid up to <span className="mono">{preview!.amount!.text}</span>?</strong> We bid for you only as much as needed to keep you in the lead. If you win at your maximum you pay <strong className="mono w500">{preview!.total!.text}</strong> in total. A winning bid is binding.</span>
             </div>
-          )}
-          {preview?.availableToBid && <div className="small muted">You can bid up to {preview.availableToBid.text} all-in across your leading lots.</div>}
-          <button className="btn block lg" disabled={preview?.status !== 'ok'} onClick={() => setStep('confirm')}>Review bid</button>
-        </>
-      ) : (
-        <>
-          <div className="notice info">
-            <strong>Bid up to {preview!.amount!.text}?</strong>
-            <div>We bid for you only as much as needed to keep you in the lead. If you win at your maximum, you pay <strong>{preview!.total!.text}</strong> in total. A winning bid is binding.</div>
-          </div>
-          <div className="row">
-            <button className="btn ghost" style={{ flex: 1 }} onClick={() => setStep('enter')} disabled={busy}>Change</button>
-            <button className="btn lg" style={{ flex: 2 }} onClick={confirm} disabled={busy}>{busy ? 'Placing bid…' : 'Confirm bid'}</button>
-          </div>
-        </>
-      )}
-
-      <div className="small muted row" style={{ alignItems: 'flex-start' }}>
-        <ShieldCheck size={16} style={{ flex: 'none', marginTop: 2 }} />
+            <div className="btn-group" style={{ width: '100%' }}>
+              <button className="btn ghost lg" style={{ flex: 1 }} onClick={() => setStep('enter')} disabled={busy}>Change</button>
+              <button className="btn lg" style={{ flex: 2 }} onClick={confirm} disabled={busy}>{busy ? 'Placing bid…' : 'Confirm bid'}</button>
+            </div>
+          </>
+        )}
+      </div>
+      <div className="reassure">
+        <ShieldCheckIcon />
         <span>
           Pay within {lot.rules?.payWindowHours ?? 48} hours of the close from your wallet. Collect from {lot.branch.name} within {lot.rules?.collectWindowHours ?? 48} hours.
-          {lot.isVehicle && ' Released after police, ZIMRA and CVR transfer are complete.'}
+          {lot.isVehicle && ' Released once police, ZIMRA and CVR transfer are complete.'}
+          {lot.rules && <> Late bids extend the lot by {Math.round(lot.rules.softCloseSeconds / 60)} minutes.</>}
         </span>
       </div>
     </aside>
@@ -158,12 +160,14 @@ export function BidPanel({ lot, signedIn }: { lot: LotDetail; signedIn: boolean 
 }
 
 function AllIn({ lot }: { lot: LotDetail }) {
-  if (!lot.breakdown) return <div className="notice">The full price for this lot is not available right now, so bidding is paused.</div>;
+  if (!lot.breakdown) return <div className="notice"><InformationCircleIcon /><span>The full price for this lot is not available right now, so bidding is paused.</span></div>;
   return (
     <div>
-      <div className="small muted row" style={{ marginBottom: 6 }}><Info size={14} /> If you win at the next minimum bid</div>
-      {lot.breakdown.lines.map((l) => <div key={l.type} className="kv"><span>{l.description}</span><span>{l.amount.text}</span></div>)}
-      <div className="kv total"><span>Total you pay</span><span>{lot.breakdown.total.text}</span></div>
+      <div className="micro" style={{ marginBottom: 6 }}>If you win at the next minimum bid</div>
+      <div className="lines">
+        {lot.breakdown.lines.map((l) => <div key={l.type} className="l"><span>{l.description}</span><span>{l.amount.text}</span></div>)}
+        <div className="l total"><span>Total you pay</span><span>{lot.breakdown.total.text}</span></div>
+      </div>
     </div>
   );
 }
@@ -196,19 +200,19 @@ function JoinAuction({ lot }: { lot: LotDetail }) {
   return (
     <div className="stack">
       <div className="notice info">
-        Join <strong>{lot.auction.title}</strong> to bid.
-        {lot.auction.depositRequired && min && <> This auction needs a refundable deposit of at least {min.text}, held from your wallet. You can bid up to 10 times your deposit.</>}
+        <InformationCircleIcon />
+        <span>Join <strong className="w600">{lot.auction.title}</strong> to bid.{lot.auction.depositRequired && min && <> It needs a refundable deposit of at least <span className="mono">{min.text}</span>, held from your wallet. You can bid up to ten times your deposit.</>}</span>
       </div>
       {lot.auction.depositRequired && (
         <div className="field">
           <label htmlFor="deposit">Deposit (US$)</label>
-          <div className="amount-input">
+          <div className="amount">
             <span className="cur">US$</span>
             <input id="deposit" inputMode="decimal" value={deposit} onChange={(e) => setDeposit(e.target.value)} />
           </div>
         </div>
       )}
-      {error && <div className="notice bad">{error}</div>}
+      {error && <div className="notice bad"><ExclamationTriangleIcon /><span>{error}</span></div>}
       <button className="btn block lg" onClick={join} disabled={busy}>{busy ? 'Joining…' : 'Join auction'}</button>
     </div>
   );

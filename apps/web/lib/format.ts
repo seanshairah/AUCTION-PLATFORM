@@ -27,3 +27,7 @@ export function timeLeft(endsAt: string, now = Date.now()): { text: string; urge
 export function shortDateTime(iso: string): string {
   return new Date(iso).toLocaleString('en-ZW', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Harare' });
 }
+
+export function shortDate(iso: string): string {
+  return new Date(iso).toLocaleString('en-ZW', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Harare' });
+}

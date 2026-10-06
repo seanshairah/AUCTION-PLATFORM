@@ -9,7 +9,7 @@ import { AccountController } from './bidding/account.controller';
 import { BidDesk } from './bidding/bid-desk';
 import { jsonReplacer } from './http';
 import { CatalogueReader } from './lots/catalogue-reader';
-import { LotsController } from './lots/lots.controller';
+import { AuctionsController, LotsController } from './lots/lots.controller';
 import { readCookie, SESSION_COOKIE, verifySession, type RequestWithAccount } from './session';
 import { SystemController } from './system.controller';
 import { BID_DESK, CATALOGUE, CONFIG, DB, RULEBOOK, type ApiConfig } from './tokens';
@@ -37,7 +37,7 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
   const catalogue = new CatalogueReader(db, rulebook);
   return {
     module: ApiModule,
-    controllers: [LotsController, AccountController, SystemController],
+    controllers: [LotsController, AuctionsController, AccountController, SystemController],
     providers: [
       { provide: CONFIG, useValue: config },
       { provide: DB, useValue: db },

@@ -1,4 +1,4 @@
-import { Topbar } from '@/components/Topbar';
+import { InformationCircleIcon } from '@heroicons/react/20/solid';
 import { DemoSignIn } from '@/components/DemoSignIn';
 import { apiOrNull } from '@/lib/api';
 
@@ -7,24 +7,21 @@ export const metadata = { title: 'Sign in' };
 export default async function SignInPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
   const { next } = await searchParams;
   const accounts = await apiOrNull<Array<{ id: string; name: string }>>('/session/demo-accounts');
+  const safeNext = next?.startsWith('/') && !next.startsWith('//') ? next : '/auctions';
   return (
-    <>
-      <Topbar title="Sign in" me={null} />
-      <div className="content stack" style={{ maxWidth: 760 }}>
+    <section className="section">
+      <div className="wrap" style={{ maxWidth: 760 }}>
+        <div className="micro">Your account</div>
+        <h1 className="display d-lg" style={{ margin: '8px 0 16px' }}>Sign in</h1>
         {accounts ? (
-          <>
-            <div className="notice">
-              <strong>Demo environment.</strong> Sign-in by phone and email one-time code comes with the identity module. Here you can act as one of the demo bidders.
-            </div>
-            <DemoSignIn accounts={accounts} next={next?.startsWith('/') ? next : '/auctions'} />
-          </>
-        ) : (
-          <div className="card section">
-            <h2>Sign-in is not available yet</h2>
-            <p className="muted" style={{ margin: 0 }}>Signing in with a one-time code by SMS, WhatsApp or email arrives with the identity module.</p>
+          <div className="stack">
+            <div className="notice"><InformationCircleIcon /><span><strong className="w600">Demo environment.</strong> Choose a demo bidder. Each has a wallet, a deposit held for the vehicle auction and some bids already placed.</span></div>
+            <DemoSignIn accounts={accounts} next={safeNext} />
           </div>
+        ) : (
+          <div className="notice neutral"><InformationCircleIcon /><span>Sign-in with a one-time code by WhatsApp, SMS or email is not enabled in this environment.</span></div>
         )}
       </div>
-    </>
+    </section>
   );
 }

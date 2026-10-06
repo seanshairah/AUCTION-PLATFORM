@@ -12,6 +12,32 @@ import { maybeMoney, moneyJson, type MoneyJson } from '../http';
  * the commit screen, the bid check and the invoice use (architecture rule R2).
  */
 
+/**
+ * Where a stored object is served from. Production points MEDIA_BASE_URL at the object
+ * store's CDN; development serves the demo photo set from the web app's /media route.
+ */
+export function mediaUrl(objectKey: string, env: NodeJS.ProcessEnv = process.env): string {
+  const base = (env.MEDIA_BASE_URL ?? '/media').replace(/\/$/, '');
+  return `${base}/${objectKey.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+export interface AuctionSummary {
+  id: string;
+  code: string;
+  title: string;
+  branch: { code: string; name: string; city: string };
+  status: string;
+  opensAt: string;
+  firstCloseAt: string;
+  lastCloseAt: string | null;
+  staggerSeconds: number;
+  depositRequired: boolean;
+  lots: number;
+  liveLots: number;
+  bids: number;
+  cover: string | null;
+}
+
 export interface LotFilters {
   q?: string;
   category?: 'vehicles' | 'other';
@@ -76,6 +102,7 @@ interface LotRow {
   bid_count: bigint;
   bidder_count: bigint;
   photo_count: bigint;
+  cover_key: string | null;
   created_at: Date;
 }
 
@@ -90,6 +117,7 @@ SELECT al.id AS auction_lot_id, l.id AS lot_id, l.lot_ref, l.title, l.descriptio
        (SELECT count(*) FROM bidding.bid x WHERE x.auction_lot_id = al.id AND x.outcome_at_placement <> 'rejected') AS bid_count,
        (SELECT count(DISTINCT x.account_id) FROM bidding.bid x WHERE x.auction_lot_id = al.id AND x.outcome_at_placement <> 'rejected') AS bidder_count,
        (SELECT count(*) FROM catalogue.lot_media m WHERE m.lot_id = l.id AND m.kind = 'photo') AS photo_count,
+       (SELECT m.object_key FROM catalogue.lot_media m WHERE m.lot_id = l.id AND m.kind = 'photo' ORDER BY m.sort LIMIT 1) AS cover_key,
        l.created_at
   FROM auction.auction_lot al
   JOIN auction.auction a ON a.id = al.auction_id
@@ -145,6 +173,8 @@ export interface LotCard {
   reserveStatus: 'no_reserve' | 'met' | 'not_met';
   inspectionSummary: string | null;
   photoCount: number;
+  /** The first photo (the standard set starts with the front), or null when there is none. */
+  cover: string | null;
   viewer: { leading: boolean } | null;
 }
 
@@ -226,6 +256,7 @@ export class CatalogueReader {
       reserveStatus: row.reserve_minor === null ? 'no_reserve' : (row.current_price_minor ?? -1n) >= row.reserve_minor ? 'met' : 'not_met',
       inspectionSummary: row.inspection_summary,
       photoCount: Number(row.photo_count),
+      cover: row.cover_key ? mediaUrl(row.cover_key) : null,
       viewer: viewerId ? { leading: row.leading_account_id === viewerId } : null,
     };
   }
@@ -366,7 +397,7 @@ export class CatalogueReader {
       scheduledEndAt: row.scheduled_end_at.toISOString(),
       closed: row.result !== 'pending',
       result: row.result,
-      media: media.rows.map((m) => ({ kind: m.kind, role: m.role })),
+      media: media.rows.map((m) => ({ kind: m.kind, role: m.role, url: mediaUrl(m.object_key) })),
       inspection: report
         ? {
             publishedAt: report.published_at.toISOString(),
@@ -394,6 +425,69 @@ export class CatalogueReader {
       viewer: viewerId
         ? { leading: row.leading_account_id === viewerId, yourMax: maybeMoney(viewerMax, row.currency), registration: registration.rows[0]?.status ?? null }
         : null,
+    };
+  }
+
+  /** Auctions open or about to open, soonest closing first: the event pages and the home page. */
+  async auctions(): Promise<AuctionSummary[]> {
+    const r = await this.db.query<{
+      id: string; code: string; title: string; branch_code: string; branch_name: string; city: string; status: string; opens_at: Date;
+      first_close_at: Date; last_close_at: Date | null; stagger_seconds: number; deposit_required: boolean; lots: bigint; live_lots: bigint; bids: bigint; cover_key: string | null;
+    }>(
+      `SELECT a.id, a.code, a.title, a.branch_code, b.name AS branch_name, b.city, a.status, a.opens_at, a.first_close_at, a.stagger_seconds, a.deposit_required,
+              (SELECT max(al.current_end_at) FROM auction.auction_lot al WHERE al.auction_id = a.id) AS last_close_at,
+              (SELECT count(*) FROM auction.auction_lot al WHERE al.auction_id = a.id) AS lots,
+              (SELECT count(*) FROM auction.auction_lot al WHERE al.auction_id = a.id AND al.result = 'pending') AS live_lots,
+              (SELECT count(*) FROM bidding.bid x JOIN auction.auction_lot al ON al.id = x.auction_lot_id
+                WHERE al.auction_id = a.id AND x.outcome_at_placement <> 'rejected') AS bids,
+              (SELECT m.object_key FROM auction.auction_lot al JOIN catalogue.lot_media m ON m.lot_id = al.lot_id
+                WHERE al.auction_id = a.id AND m.kind = 'photo' ORDER BY al.lot_number, m.sort LIMIT 1) AS cover_key
+         FROM auction.auction a JOIN core.branch b ON b.code = a.branch_code
+        WHERE a.status IN ('scheduled', 'open')
+        ORDER BY a.first_close_at`,
+    );
+    return r.rows.map((a) => ({
+      id: a.id,
+      code: a.code,
+      title: a.title,
+      branch: { code: a.branch_code, name: a.branch_name, city: a.city },
+      status: a.status,
+      opensAt: a.opens_at.toISOString(),
+      firstCloseAt: a.first_close_at.toISOString(),
+      lastCloseAt: a.last_close_at?.toISOString() ?? null,
+      staggerSeconds: a.stagger_seconds,
+      depositRequired: a.deposit_required,
+      lots: Number(a.lots),
+      liveLots: Number(a.live_lots),
+      bids: Number(a.bids),
+      cover: a.cover_key ? mediaUrl(a.cover_key) : null,
+    }));
+  }
+
+  /** The figures a lot page refreshes while open: cheap enough to poll every few seconds. */
+  async live(idOrRef: string, viewerId: string | null) {
+    const byId = /^[0-9a-f-]{36}$/.test(idOrRef);
+    const r = await this.db.query<{ currency: Currency; current_price_minor: bigint | null; starting_bid_minor: bigint; reserve_minor: bigint | null; current_end_at: Date; extension_count: number; result: string; leading_account_id: string | null; bids: bigint; bidders: bigint }>(
+      `SELECT al.currency, al.current_price_minor, al.starting_bid_minor, al.reserve_minor, al.current_end_at, al.extension_count, al.result, al.leading_account_id,
+              (SELECT count(*) FROM bidding.bid x WHERE x.auction_lot_id = al.id AND x.outcome_at_placement <> 'rejected') AS bids,
+              (SELECT count(DISTINCT x.account_id) FROM bidding.bid x WHERE x.auction_lot_id = al.id AND x.outcome_at_placement <> 'rejected') AS bidders
+         FROM auction.auction_lot al JOIN catalogue.lot l ON l.id = al.lot_id
+        WHERE ${byId ? 'al.id = $1' : 'l.lot_ref = $1'}
+        ORDER BY al.scheduled_end_at DESC LIMIT 1`,
+      [idOrRef],
+    );
+    const x = r.rows[0];
+    if (!x) return null;
+    return {
+      currentPrice: maybeMoney(x.current_price_minor, x.currency),
+      bids: Number(x.bids),
+      bidders: Number(x.bidders),
+      endsAt: x.current_end_at.toISOString(),
+      extended: x.extension_count > 0,
+      closed: x.result !== 'pending',
+      reserveStatus: x.reserve_minor === null ? 'no_reserve' : (x.current_price_minor ?? -1n) >= x.reserve_minor ? 'met' : 'not_met',
+      leading: viewerId ? x.leading_account_id === viewerId : null,
+      serverTime: new Date().toISOString(),
     };
   }
 

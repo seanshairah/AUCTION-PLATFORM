@@ -57,6 +57,8 @@ const PEOPLE: DemoPerson[] = [
 export const DEMO_BIDDERS = ['tendai', 'rudo', 'farai'] as const;
 
 interface DemoVehicle {
+  /** Demo photo set in apps/web/public/media/demo/vehicles/<photo> (Wikimedia Commons, credited there). */
+  photo: string;
   make: string;
   model: string;
   year: number;
@@ -73,16 +75,16 @@ interface DemoVehicle {
 }
 
 const VEHICLES: DemoVehicle[] = [
-  { make: 'Toyota', model: 'Hilux 2.4 GD-6 Double Cab', year: 2019, odometerKm: 118_400, zimbabweRegistered: true, startingBid: 18_000, reserve: 24_000, body: 'pickup', transmission: 'manual', drive: '4wd', colour: 'White', fuel: 'diesel', note: { item: 'tyres', answer: 'attention', note: 'Rear tyres at 3 mm' } },
-  { make: 'Toyota', model: 'Fortuner 2.8 GD-6 4x4', year: 2018, odometerKm: 142_000, zimbabweRegistered: true, startingBid: 20_000, reserve: 27_500, body: 'suv', transmission: 'automatic', drive: '4wd', colour: 'Silver', fuel: 'diesel' },
-  { make: 'Honda', model: 'Fit Hybrid', year: 2014, odometerKm: 96_300, zimbabweRegistered: true, startingBid: 3_500, reserve: null, body: 'hatchback', transmission: 'automatic', drive: '2wd', colour: 'Blue', fuel: 'hybrid', note: { item: 'paint', answer: 'attention', note: 'Fading on roof and bonnet' } },
-  { make: 'Toyota', model: 'Aqua', year: 2015, odometerKm: 88_900, zimbabweRegistered: false, startingBid: 4_200, reserve: 5_500, body: 'hatchback', transmission: 'automatic', drive: '2wd', colour: 'Red', fuel: 'hybrid' },
-  { make: 'Isuzu', model: 'D-Max 250 Extended Cab', year: 2020, odometerKm: 74_500, zimbabweRegistered: true, startingBid: 14_000, reserve: 19_000, body: 'pickup', transmission: 'manual', drive: '2wd', colour: 'Grey', fuel: 'diesel' },
-  { make: 'Ford', model: 'Ranger 2.2 XLS Double Cab', year: 2019, odometerKm: 131_200, zimbabweRegistered: true, startingBid: 13_500, reserve: null, body: 'pickup', transmission: 'manual', drive: '4wd', colour: 'Black', fuel: 'diesel', note: { item: 'air_conditioning', answer: 'fail', note: 'Compressor not engaging' } },
-  { make: 'Mercedes-Benz', model: 'C200 Avantgarde', year: 2015, odometerKm: 109_800, zimbabweRegistered: false, startingBid: 9_000, reserve: 12_500, body: 'sedan', transmission: 'automatic', drive: '2wd', colour: 'Obsidian black', fuel: 'petrol' },
-  { make: 'Nissan', model: 'NP300 Hardbody 2.5 TDi', year: 2018, odometerKm: 156_700, zimbabweRegistered: true, startingBid: 8_500, reserve: null, body: 'pickup', transmission: 'manual', drive: '2wd', colour: 'White', fuel: 'diesel' },
-  { make: 'Volkswagen', model: 'Polo Vivo 1.4 Trendline', year: 2019, odometerKm: 64_100, zimbabweRegistered: true, startingBid: 6_000, reserve: 8_000, body: 'hatchback', transmission: 'manual', drive: '2wd', colour: 'Silver', fuel: 'petrol' },
-  { make: 'Toyota', model: 'Land Cruiser 79 4.5 V8 Single Cab', year: 2016, odometerKm: 201_300, zimbabweRegistered: true, startingBid: 28_000, reserve: 36_000, body: 'pickup', transmission: 'manual', drive: '4wd', colour: 'Beige', fuel: 'diesel', note: { item: 'leaks', answer: 'attention', note: 'Minor oil weep at rear main seal' } },
+  { photo: 'toyota-hilux', make: 'Toyota', model: 'Hilux 2.4 GD-6 Double Cab', year: 2019, odometerKm: 118_400, zimbabweRegistered: true, startingBid: 18_000, reserve: 24_000, body: 'pickup', transmission: 'manual', drive: '4wd', colour: 'Silver', fuel: 'diesel', note: { item: 'tyres', answer: 'attention', note: 'Rear tyres at 3 mm' } },
+  { photo: 'toyota-fortuner', make: 'Toyota', model: 'Fortuner 2.8 GD-6 4x4', year: 2018, odometerKm: 142_000, zimbabweRegistered: true, startingBid: 20_000, reserve: 27_500, body: 'suv', transmission: 'automatic', drive: '4wd', colour: 'White', fuel: 'diesel' },
+  { photo: 'honda-fit', make: 'Honda', model: 'Fit Hybrid', year: 2014, odometerKm: 96_300, zimbabweRegistered: true, startingBid: 3_500, reserve: null, body: 'hatchback', transmission: 'automatic', drive: '2wd', colour: 'Silver', fuel: 'hybrid', note: { item: 'paint', answer: 'attention', note: 'Fading on roof and bonnet' } },
+  { photo: 'toyota-aqua', make: 'Toyota', model: 'Aqua', year: 2015, odometerKm: 88_900, zimbabweRegistered: false, startingBid: 4_200, reserve: 5_500, body: 'hatchback', transmission: 'automatic', drive: '2wd', colour: 'White', fuel: 'hybrid' },
+  { photo: 'isuzu-dmax', make: 'Isuzu', model: 'D-Max 3.0 Double Cab', year: 2020, odometerKm: 74_500, zimbabweRegistered: true, startingBid: 14_000, reserve: 19_000, body: 'pickup', transmission: 'manual', drive: '2wd', colour: 'White', fuel: 'diesel' },
+  { photo: 'ford-ranger', make: 'Ford', model: 'Ranger 2.2 XLS Double Cab', year: 2019, odometerKm: 131_200, zimbabweRegistered: true, startingBid: 13_500, reserve: null, body: 'pickup', transmission: 'manual', drive: '4wd', colour: 'Grey', fuel: 'diesel', note: { item: 'air_conditioning', answer: 'fail', note: 'Compressor not engaging' } },
+  { photo: 'mercedes-c200', make: 'Mercedes-Benz', model: 'C200 Avantgarde', year: 2015, odometerKm: 109_800, zimbabweRegistered: false, startingBid: 9_000, reserve: 12_500, body: 'sedan', transmission: 'automatic', drive: '2wd', colour: 'White', fuel: 'petrol' },
+  { photo: 'nissan-np300', make: 'Nissan', model: 'NP300 Hardbody 2.5 TDi', year: 2018, odometerKm: 156_700, zimbabweRegistered: true, startingBid: 8_500, reserve: null, body: 'pickup', transmission: 'manual', drive: '2wd', colour: 'Silver', fuel: 'diesel' },
+  { photo: 'vw-polo-vivo', make: 'Volkswagen', model: 'Polo Vivo 1.4 Trendline', year: 2019, odometerKm: 64_100, zimbabweRegistered: true, startingBid: 6_000, reserve: 8_000, body: 'hatchback', transmission: 'manual', drive: '2wd', colour: 'White', fuel: 'petrol' },
+  { photo: 'land-cruiser-79', make: 'Toyota', model: 'Land Cruiser 79 4.5 V8 Single Cab', year: 2016, odometerKm: 201_300, zimbabweRegistered: true, startingBid: 28_000, reserve: 36_000, body: 'pickup', transmission: 'manual', drive: '4wd', colour: 'Beige', fuel: 'diesel', note: { item: 'leaks', answer: 'attention', note: 'Minor oil weep at rear main seal' } },
 ];
 
 /** Bids placed after opening, as (bidder, lot index, maximum in dollars). */
@@ -302,10 +304,10 @@ export async function seedDemo(
       const media: string[] = [];
       const params: unknown[] = [lotId];
       for (let k = 0; k < 38; k++) {
-        params.push(photoRole(k), `demo/${code}-${n}/photo-${String(k + 1).padStart(2, '0')}.jpg`, k);
+        params.push(photoRole(k), `demo/${code}-${n}/v/${v.photo}/photo-${String(k + 1).padStart(2, '0')}.jpg`, k);
         media.push(`($1, 'photo', $${params.length - 2}, $${params.length - 1}, $${params.length})`);
       }
-      params.push(`demo/${code}-${n}/walkaround.mp4`);
+      params.push(`demo/${code}-${n}/v/${v.photo}/walkaround.mp4`);
       media.push(`($1, 'video', 'walkaround', $${params.length}, 100)`);
       await c.query(`INSERT INTO catalogue.lot_media (lot_id, kind, role, object_key, sort) VALUES ${media.join(', ')}`, params);
     });
