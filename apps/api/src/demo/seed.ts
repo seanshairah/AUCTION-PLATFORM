@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { createAdminServices, type StaffMember } from '@abc/admin';
 import { BiddingService } from '@abc/bidding';
 import { checkListingReadiness } from '@abc/catalogue';
 import { readRuleSetDocument, RulebookStore, SYSTEM, type Actor, type Db } from '@abc/db';
@@ -9,6 +10,7 @@ import { SettlementService } from '@abc/settlement';
 import { quoteLot } from '@abc/quote';
 import type { RuleRecord } from '@abc/rules';
 import { SellerService } from '@abc/seller';
+import { SupportService } from '@abc/support';
 import { CHECKLISTS, VehicleService, type InspectionInput } from '@abc/vehicles';
 
 /**
@@ -52,6 +54,8 @@ const PEOPLE: DemoPerson[] = [
   { key: 'staff', name: 'Chipo Moyo (ABC staff, demo)', phone: '+263770000101', verification: 'full', staffRole: 'ops' },
   { key: 'approver', name: 'Tawanda Ncube (ABC finance, demo)', phone: '+263770000102', verification: 'full', staffRole: 'finance' },
   { key: 'risk', name: 'Rufaro Dube (ABC risk, demo)', phone: '+263770000103', verification: 'full', staffRole: 'risk' },
+  { key: 'admin', name: 'Nyasha Sibanda (ABC admin, demo)', phone: '+263770000104', verification: 'full', staffRole: 'admin' },
+  { key: 'support', name: 'Kudzai Mhlanga (ABC support, demo)', phone: '+263770000105', verification: 'full', staffRole: 'support' },
   { key: 'seller', name: 'Borrowdale Motors (demo seller)', phone: '+263770000201', verification: 'full' },
   { key: 'tendai', name: 'Tendai M.', phone: '+263770000301', verification: 'full' },
   { key: 'rudo', name: 'Rudo K.', phone: '+263770000302', verification: 'full' },
@@ -433,8 +437,33 @@ export async function seedDemo(
   await seedClosedAuction(db, { ids, staff, ruleVersionId, now, code: `DEMO-BYO-${stamp}`, rulebook, registrations, bidding, vehicles, notes });
   // Collection slots from branch opening hours (the worker keeps them topped up hourly).
   await new LogisticsService(db, rulebook, new SettlementService(db, rulebook, { gatePassSecret: process.env.GATE_PASS_SECRET ?? 'dev-only-gate-pass-secret' })).ensureSlots(now);
+  await seedStaffQueues(db, { ids, rulebook, registrations, bidding, vehicles, now });
 
   return { auctionId, auctionCode: code, created: true, ruleVersionId, accounts: ids, lots: VEHICLES.length, bids, notes };
+}
+
+/**
+ * Work waiting in the staff console, raised through the same services staff use: a
+ * customer ticket in the support queue and a limit increase above the two-person
+ * threshold, raised by risk and waiting for finance or admin to approve it (R3).
+ */
+async function seedStaffQueues(
+  db: Db,
+  p: { ids: Record<string, string>; rulebook: RulebookStore; registrations: RegistrationService; bidding: BiddingService; vehicles: VehicleService; now: Date },
+): Promise<void> {
+  const { ids } = p;
+  const support = new SupportService(db, p.rulebook, p.vehicles);
+  await support.openTicket({ type: 'account', id: ids.farai!, name: 'Farai C.', reason: 'demo seed: support ticket' }, {
+    accountId: ids.farai!, channel: 'whatsapp', category: 'bidding', clientKey: 'demo-seed-ticket-1',
+    subject: 'Can my bidding limit go above US$8,000?',
+    body: 'I want to bid on the Land Cruiser but my limit stops at US$8,000. I can bring a bank guarantee to the Harare branch this week.',
+  }, p.now);
+  const admin = createAdminServices(db, p.rulebook, { registrations: p.registrations, bidding: p.bidding });
+  const risk: StaffMember = { id: ids.risk!, name: 'Rufaro Dube', roles: ['risk'] };
+  await admin.overrides.request(risk, {
+    kind: 'limit_change', reason: 'Bank guarantee of US$25,000 from CBZ, seen at the Harare branch', clientKey: 'demo-seed-limit-1',
+    payload: { accountId: ids.farai!, currency: 'USD', limitMinor: '2500000', validUntil: new Date(p.now.getTime() + 14 * 24 * HOUR).toISOString() },
+  }, p.now);
 }
 
 /**

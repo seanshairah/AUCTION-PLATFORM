@@ -119,8 +119,10 @@ describe.skipIf(!DB_TESTS_ENABLED)('support and disputes API against PostgreSQL'
     expect((await http().post(`/tickets/${id}/messages`).set('Cookie', farai).send({ body: 'OK, I will collect.' }).expect(201)).body).toMatchObject({ added: true, status: 'open' });
     await http().post(`/tickets/${id}/messages`).set('Cookie', await signIn('tendai')).send({ body: 'not mine' }).expect(404);
     const mine = await http().get('/me/tickets').set('Cookie', farai).expect(200);
-    expect(mine.body[0].messages.map((m: { body: string }) => m.body)).toEqual(['I won a fridge last week.', 'Not yet: Harare only for now.', 'OK, I will collect.']);
-    expect(mine.body[0].firstRespondedAt).not.toBeNull();
+    // Farai also has the demo seed's ticket about his bidding limit.
+    const thread = mine.body.find((x: { id: string }) => x.id === id);
+    expect(thread.messages.map((m: { body: string }) => m.body)).toEqual(['I won a fridge last week.', 'Not yet: Harare only for now.', 'OK, I will collect.']);
+    expect(thread.firstRespondedAt).not.toBeNull();
 
     expect((await http().post(`/staff/tickets/${id}/assign`).set('Cookie', staff).send({ ownerStaffId: seed.accounts.approver, priority: 'low' }).expect(201)).body).toEqual({ assigned: true });
     await http().post(`/staff/tickets/${id}/assign`).set('Cookie', staff).send({ ownerStaffId: seed.accounts.farai }).expect(400);

@@ -33,7 +33,7 @@ export function SiteFooter() {
         </div>
         <div className="legal">
           <span>© {new Date().getFullYear()} ABC Auctions</span>
-          <span><Link href="/credits" style={{ display: 'inline' }}>Photo credits</Link> · Demo environment: listings and bidders are illustrative.</span>
+          <span><Link href="/credits" style={{ display: 'inline' }}>Photo credits</Link> · <Link href="/staff/sign-in" style={{ display: 'inline' }}>Staff sign-in</Link> · Demo environment: listings and bidders are illustrative.</span>
         </div>
       </div>
     </footer>

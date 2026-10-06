@@ -115,6 +115,33 @@ describe.skipIf(!DB_TESTS_ENABLED)('API against PostgreSQL with the demo data', 
     expect(res.body.holds.map((h: { description: string }) => h.description).sort()).toEqual(['Deposit: Vehicles: Bulawayo (demo, closed)', 'Deposit: Vehicles: Harare (demo)']);
   });
 
+  it('staff console: roles and permissions, the auctions board and work waiting in the queues', async () => {
+    const http = () => request(app.getHttpServer());
+    const staff = (await http().get('/session/demo-staff-accounts').expect(200)).body as Array<{ id: string; roles: string[] }>;
+    expect(staff.flatMap((s) => s.roles).sort()).toEqual(['admin', 'finance', 'ops', 'risk', 'support']);
+    const staffIn = async (role: string) => {
+      const res = await http().post('/session/demo-staff').send({ accountId: staff.find((s) => s.roles.includes(role))!.id }).expect(201);
+      return String(res.headers['set-cookie']).split(';')[0]!;
+    };
+    const support = await staffIn('support');
+    const me = (await http().get('/staff/me').set('Cookie', support).expect(200)).body;
+    expect(me).toMatchObject({ roles: ['support'], permissions: expect.arrayContaining(['dashboard.view', 'default.appeal.record']) });
+    expect(me.permissions).not.toContain('auction.schedule');
+    await http().get('/staff/lots/offerable').set('Cookie', support).expect(403);
+    const bidder = await signIn('tendai');
+    await http().get('/staff/me').set('Cookie', bidder).expect(403);
+
+    const ops = await staffIn('ops');
+    const board = (await http().get('/staff/auctions').set('Cookie', ops).expect(200)).body;
+    expect(board).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'open', lots: 10, bids: expect.any(Number) })]));
+    expect((await http().get('/staff/lots/offerable').set('Cookie', ops).expect(200)).body).toEqual([]);
+
+    // The seed leaves a ticket in the support queue and a limit increase waiting for a second person.
+    expect((await http().get('/staff/tickets').set('Cookie', support).expect(200)).body).toEqual([expect.objectContaining({ channel: 'whatsapp', status: 'open' })]);
+    const pending = (await http().get('/staff/overrides?status=pending').set('Cookie', ops).expect(200)).body;
+    expect(pending).toEqual([expect.objectContaining({ kind: 'limit_change', requiresSecondApproval: true, amount: expect.objectContaining({ text: 'US$25,000.00' }) })]);
+  });
+
   it('serves the public rulebook from the published rule set', async () => {
     const res = await request(app.getHttpServer()).get('/rules').expect(200);
     expect(res.body.versionLabel).toMatch(/-demo$/);

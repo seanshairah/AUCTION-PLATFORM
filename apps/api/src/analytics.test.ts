@@ -39,7 +39,8 @@ describe.skipIf(!DB_TESTS_ENABLED)('analytics API with the demo data', () => {
     expect(res.body.inspectionCoverage).toEqual({ vehicleLots: 10, withReport: 10, share: 1 });
     expect(res.body.inAppPayments).toEqual([expect.objectContaining({ currency: 'USD', depositCount: 3, depositInAppCount: 0, depositShare: 0 })]);
     expect(res.body.inAppPayments[0].deposits).toEqual({ minor: '4500000', currency: 'USD', text: 'US$45,000.00' }); // three US$15,000 branch-cash top-ups
-    expect(res.body.support).toMatchObject({ instrumented: false, tickets: null });
+    // The demo seed opens one ticket, so support is measured; it is not linked to a Harare sale.
+    expect(res.body.support).toMatchObject({ instrumented: true, tickets: 0 });
     expect(res.body.sellThrough).toMatchObject({ offered: 0, rate: null }); // nothing has closed yet
     const byo = await http().get(`/staff/analytics/measures?from=${from}&to=${to}&branch=BYO`).set('Cookie', await staffCookie('staff')).expect(200);
     expect(byo.body.registrationToFirstBid.cohort).toBe(2); // Tendai and Rudo in the closed Bulawayo demo auction

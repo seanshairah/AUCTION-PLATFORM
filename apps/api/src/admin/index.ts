@@ -12,6 +12,7 @@ import { OverridesController } from './overrides.controller';
 import { ReconciliationController } from './reconciliation.controller';
 import { RiskController } from './risk.controller';
 import { RulebookController } from './rulebook.controller';
+import { StaffMeController } from './staff-me.controller';
 import { StaffSessionController } from './staff-session.controller';
 import { StaffGuard } from './staff.guard';
 import { ADMIN, ANALYTICS } from './tokens';
@@ -19,6 +20,7 @@ import { ADMIN, ANALYTICS } from './tokens';
 /** The staff console's controllers, appended to the API module in app.ts. */
 export const ADMIN_CONTROLLERS = [
   StaffSessionController,
+  StaffMeController,
   OverridesController,
   RulebookController,
   RiskController,

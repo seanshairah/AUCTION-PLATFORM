@@ -6,6 +6,7 @@ import '@fontsource/ibm-plex-sans-condensed/600.css';
 import '@fontsource/ibm-plex-mono/400.css';
 import '@fontsource/ibm-plex-mono/500.css';
 import type { Metadata, Viewport } from 'next';
+import { PublicChrome } from '@/components/PublicChrome';
 import { SiteFooter } from '@/components/SiteFooter';
 import { ServiceWorker } from '@/components/ServiceWorker';
 import { SiteHeader } from '@/components/SiteHeader';
@@ -31,9 +32,9 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   return (
     <html lang="en-ZW">
       <body>
-        <SiteHeader me={me} wallet={wallet} unread={unread?.unread ?? 0} />
+        <PublicChrome><SiteHeader me={me} wallet={wallet} unread={unread?.unread ?? 0} /></PublicChrome>
         <main>{children}</main>
-        <SiteFooter />
+        <PublicChrome><SiteFooter /></PublicChrome>
         <ServiceWorker />
       </body>
     </html>
