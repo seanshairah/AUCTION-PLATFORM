@@ -26,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Load schema and run invariant tests
+        shell: bash
         run: db/tests/run.sh 2>&1 | tee test.log
       - name: Check every test passed
         run: |
@@ -60,7 +61,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm test 2>&1 | tee test.log
+      - name: Run tests
+        shell: bash  # bash -eo pipefail: a failing test fails the step even through tee
+        run: pnpm test 2>&1 | tee test.log
       - name: Check no database test was skipped
         run: |
           if grep -E "skipped" test.log; then echo "Database tests were skipped"; exit 1; fi
