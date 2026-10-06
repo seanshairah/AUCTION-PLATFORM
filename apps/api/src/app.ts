@@ -15,6 +15,7 @@ import { ViewingsController } from './lots/viewings.controller';
 import { AccountController } from './bidding/account.controller';
 import { BidDesk } from './bidding/bid-desk';
 import { jsonReplacer } from './http';
+import { logisticsAndSupport } from './logistics/module';
 import { CatalogueReader } from './lots/catalogue-reader';
 import { AuctionsController, LotsController } from './lots/lots.controller';
 import { readCookie, SESSION_COOKIE, verifySession, type RequestWithAccount } from './session';
@@ -58,9 +59,10 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
       returnUrl: process.env.PAYNOW_RETURN_URL ?? '',
     }));
   }
+  const logisticsSupport = logisticsAndSupport(db, rulebook, { ...process.env, GATE_PASS_SECRET: config.gatePassSecret });
   return {
     module: ApiModule,
-    controllers: [LotsController, AuctionsController, AccountController, SystemController, MoneyController, SellerController, ViewingsController],
+    controllers: [LotsController, AuctionsController, AccountController, SystemController, MoneyController, SellerController, ViewingsController, ...logisticsSupport.controllers],
     providers: [
       { provide: CONFIG, useValue: config },
       { provide: DB, useValue: db },
@@ -72,6 +74,7 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
       { provide: SETTLEMENT, useValue: new SettlementService(db, rulebook, { gatePassSecret: config.gatePassSecret }) },
       { provide: SELLER, useValue: new SellerService(db, rulebook) },
       { provide: VEHICLES, useValue: new VehicleService(db, rulebook) },
+      ...logisticsSupport.providers,
     ],
   };
 }

@@ -559,6 +559,138 @@ SELECT test.expect_error('An institution''s own lot number is unique per seller 
   $$UPDATE catalogue.lot SET external_ref = 'ZIMRA-0001' WHERE lot_ref = 'HRE-TEST-1'$$],
   'duplicate key');
 
+-- -----------------------------------------------------------------------------
+-- Phase 5: logistics (deliverable 15) and support and disputes (deliverable 17)
+-- -----------------------------------------------------------------------------
+
+SELECT test.expect_ok('Collections and a one-place collection slot', ARRAY[
+  $$INSERT INTO logistics.collection (id, invoice_id, method) VALUES
+      ('00000000-0000-0000-0000-000000000c01', '00000000-0000-0000-0000-0000000007a2', 'pickup'),
+      ('00000000-0000-0000-0000-000000000c02', '00000000-0000-0000-0000-0000000007a2', 'pickup')$$,
+  $$INSERT INTO logistics.collection_slot (id, branch_code, starts_at, ends_at, capacity)
+    VALUES ('00000000-0000-0000-0000-000000000c11', 'HRE', now() + interval '1 day', now() + interval '1 day 30 minutes', 1)$$,
+  $$INSERT INTO logistics.slot_booking (collection_id, slot_id, account_id)
+    VALUES ('00000000-0000-0000-0000-000000000c01', '00000000-0000-0000-0000-000000000c11', '00000000-0000-0000-0000-0000000000b1')$$]);
+
+SELECT test.expect_error('A collection slot never takes more bookings than its capacity', ARRAY[
+  $$INSERT INTO logistics.slot_booking (collection_id, slot_id, account_id)
+    VALUES ('00000000-0000-0000-0000-000000000c02', '00000000-0000-0000-0000-000000000c11', '00000000-0000-0000-0000-0000000000b2')$$],
+  'is full');
+
+SELECT test.expect_error('A collection has one live slot booking at a time', ARRAY[
+  $$INSERT INTO logistics.collection_slot (id, branch_code, starts_at, ends_at, capacity)
+    VALUES ('00000000-0000-0000-0000-000000000c12', 'HRE', now() + interval '2 days', now() + interval '2 days 30 minutes', 5)$$,
+  $$INSERT INTO logistics.slot_booking (collection_id, slot_id, account_id)
+    VALUES ('00000000-0000-0000-0000-000000000c01', '00000000-0000-0000-0000-000000000c12', '00000000-0000-0000-0000-0000000000b1')$$],
+  'duplicate key');
+
+SELECT test.expect_ok('R1 storage, delivery and clawback journal kinds post', ARRAY[
+  $$SELECT ledger.post_journal('storage_fee', 'USD', 'storage-1', 'Storage, 1 day',
+      '[{"account": "00000000-0000-0000-0000-00000000c001", "amount": 100},
+        {"account": "00000000-0000-0000-0000-00000000c011", "amount": -100}]')$$]);
+
+SELECT test.expect_ok('Courier and towing partners', ARRAY[
+  $$INSERT INTO logistics.partner (id, kind, name, phone_e164, branches) VALUES
+      ('00000000-0000-0000-0000-000000000c21', 'courier', 'Test courier', '+263772000001', ARRAY['HRE']),
+      ('00000000-0000-0000-0000-000000000c22', 'towing',  'Test towing',  '+263772000002', ARRAY['HRE'])$$]);
+
+SELECT test.expect_error('Deliveries go by courier, never by a towing partner', ARRAY[
+  $$INSERT INTO logistics.delivery (collection_id, partner_id, account_id, town, size_class, address, currency, charge_minor, quote_lines,
+                                    rule_version_id, charge_journal_id, client_key)
+    SELECT '00000000-0000-0000-0000-000000000c02', '00000000-0000-0000-0000-000000000c22', '00000000-0000-0000-0000-0000000000b1',
+           'Harare', 'small', '{}', 'USD', 500, '[]', '00000000-0000-0000-0000-00000000e001', id, 'd-1'
+      FROM ledger.journal WHERE idempotency_key = 'storage-1'$$],
+  'not a courier');
+
+SELECT test.expect_error('A delivery is marked delivered only with proof', ARRAY[
+  $$INSERT INTO logistics.delivery (collection_id, partner_id, account_id, town, size_class, address, currency, charge_minor, quote_lines,
+                                    rule_version_id, charge_journal_id, client_key, status, delivered_at)
+    SELECT '00000000-0000-0000-0000-000000000c02', '00000000-0000-0000-0000-000000000c21', '00000000-0000-0000-0000-0000000000b1',
+           'Harare', 'small', '{}', 'USD', 500, '[]', '00000000-0000-0000-0000-00000000e001', id, 'd-2', 'delivered', now()
+      FROM ledger.journal WHERE idempotency_key = 'storage-1'$$],
+  'check constraint');
+
+SELECT test.expect_ok('A delivery is booked with a courier', ARRAY[
+  $$INSERT INTO logistics.delivery (id, collection_id, partner_id, account_id, town, size_class, address, currency, charge_minor, quote_lines,
+                                    rule_version_id, charge_journal_id, client_key)
+    SELECT '00000000-0000-0000-0000-000000000c31', '00000000-0000-0000-0000-000000000c02', '00000000-0000-0000-0000-000000000c21',
+           '00000000-0000-0000-0000-0000000000b1', 'Harare', 'small', '{}', 'USD', 500, '[]', '00000000-0000-0000-0000-00000000e001', id, 'd-3'
+      FROM ledger.journal WHERE idempotency_key = 'storage-1'$$,
+  $$INSERT INTO logistics.delivery_event (delivery_id, status, recorded_by)
+    VALUES ('00000000-0000-0000-0000-000000000c31', 'booked', '00000000-0000-0000-0000-0000000000b1')$$]);
+
+SELECT test.expect_error('Delivery status history is append-only', ARRAY[
+  $$UPDATE logistics.delivery_event SET status = 'delivered'$$], 'append-only');
+
+SELECT test.expect_ok('A buyer raises a claim against a lot', ARRAY[
+  $$INSERT INTO support.dispute (id, lot_id, invoice_id, raised_by, category, listed_condition, description, response_due_at)
+    VALUES ('00000000-0000-0000-0000-000000000d01', '00000000-0000-0000-0000-0000000001a1', '00000000-0000-0000-0000-0000000007a2',
+            '00000000-0000-0000-0000-0000000000b1', 'not_as_described', 'working', 'Does not power on', now() + interval '24 hours')$$]);
+
+SELECT test.expect_error('One open claim per lot', ARRAY[
+  $$INSERT INTO support.dispute (lot_id, invoice_id, raised_by, category, listed_condition, description, response_due_at)
+    VALUES ('00000000-0000-0000-0000-0000000001a1', '00000000-0000-0000-0000-0000000007a2',
+            '00000000-0000-0000-0000-0000000000b1', 'missing', 'working', 'Second claim', now() + interval '24 hours')$$],
+  'duplicate key');
+
+SELECT test.expect_error('A seller is never paid while a claim holds the payout', ARRAY[
+  $$INSERT INTO payout.payout_hold (payout_id, dispute_id) VALUES ('00000000-0000-0000-0000-0000000008a2', '00000000-0000-0000-0000-000000000d01')$$,
+  $$UPDATE payout.payout SET status = 'held' WHERE id = '00000000-0000-0000-0000-0000000008a2'$$,
+  $$UPDATE payout.payout SET status = 'paid' WHERE id = '00000000-0000-0000-0000-0000000008a2'$$],
+  'held while a dispute is open');
+
+SELECT test.expect_error('A lot is refunded only through an upheld full-refund claim', ARRAY[
+  $$UPDATE catalogue.lot SET state = 'refunded' WHERE lot_ref = 'HRE-TEST-1'$$],
+  'upheld full-refund');
+
+SELECT test.expect_error('A refund decision cannot cite an override that was not approved', ARRAY[
+  $$INSERT INTO audit.override_request (id, action_type, entity_type, entity_id, currency, amount_minor, reason, requested_by, requires_second_approval)
+    VALUES ('00000000-0000-0000-0000-000000000d11', 'refund', 'support.dispute', '00000000-0000-0000-0000-000000000d01', 'USD', 1155,
+            'Full refund, item dead on arrival', '00000000-0000-0000-0000-0000000000f1', true)$$,
+  $$UPDATE support.dispute SET refund_minor = 1155, override_request_id = '00000000-0000-0000-0000-000000000d11'
+     WHERE id = '00000000-0000-0000-0000-000000000d01'$$],
+  'not an approved refund');
+
+SELECT test.expect_error('An upheld refund needs its ledger journal', ARRAY[
+  $$UPDATE support.dispute SET status = 'upheld', remedy = 'full_refund_and_return', refund_minor = 1155, decision = 'Dead on arrival',
+            decided_by = '00000000-0000-0000-0000-0000000000f1', decided_at = now()
+     WHERE id = '00000000-0000-0000-0000-000000000d01'$$],
+  'dispute_refund_journal_check');
+
+SELECT test.expect_ok('After an upheld full refund, even a paid-out lot returns (refunded)', ARRAY[
+  $$UPDATE support.dispute SET status = 'upheld', remedy = 'full_refund_and_return', refund_minor = 100, decision = 'Dead on arrival',
+            decided_by = '00000000-0000-0000-0000-0000000000f1', decided_at = now(),
+            refund_journal_id = (SELECT id FROM ledger.journal WHERE idempotency_key = 'storage-1')
+     WHERE id = '00000000-0000-0000-0000-000000000d01'$$,
+  $$UPDATE catalogue.lot SET state = 'refunded' WHERE lot_ref = 'HRE-TEST-1'$$,
+  $$UPDATE catalogue.lot SET state = 'withdrawn' WHERE lot_ref = 'HRE-TEST-1'$$]);
+
+SELECT test.expect_error('A clawback never recovers more than it is owed', ARRAY[
+  $$INSERT INTO payout.clawback (seller_account_id, currency, amount_minor, recovered_minor, dispute_id)
+    VALUES ('00000000-0000-0000-0000-0000000000a1', 'USD', 100, 150, '00000000-0000-0000-0000-000000000d01')$$],
+  'check constraint');
+
+SELECT test.expect_ok('A support ticket with its first message', ARRAY[
+  $$INSERT INTO support.ticket (id, account_id, opened_by, channel, category, subject, first_response_due_at, resolution_due_at)
+    VALUES ('00000000-0000-0000-0000-000000000e11', '00000000-0000-0000-0000-0000000000b1', '00000000-0000-0000-0000-0000000000b1',
+            'whatsapp', 'collection', 'Where do I collect?', now() + interval '8 hours', now() + interval '72 hours')$$,
+  $$INSERT INTO support.ticket_message (ticket_id, author_account_id, author_kind, body)
+    VALUES ('00000000-0000-0000-0000-000000000e11', '00000000-0000-0000-0000-0000000000b1', 'customer', 'Which branch?')$$]);
+
+SELECT test.assert('Tickets get a readable number', (SELECT ticket_number ~ '^T-\d{6}$' FROM support.ticket WHERE id = '00000000-0000-0000-0000-000000000e11'));
+
+SELECT test.expect_error('Ticket messages are append-only', ARRAY[
+  $$UPDATE support.ticket_message SET body = 'edited'$$], 'append-only');
+
+SELECT test.expect_error('Only staff write internal notes', ARRAY[
+  $$INSERT INTO support.ticket_message (ticket_id, author_account_id, author_kind, body, internal)
+    VALUES ('00000000-0000-0000-0000-000000000e11', '00000000-0000-0000-0000-0000000000b1', 'customer', 'secret', true)$$],
+  'check constraint');
+
+SELECT test.expect_error('A resolved ticket records when it was resolved', ARRAY[
+  $$UPDATE support.ticket SET status = 'resolved' WHERE id = '00000000-0000-0000-0000-000000000e11'$$],
+  'check constraint');
+
 SELECT 'ALL INVARIANT TESTS PASSED' AS result;
 
 ROLLBACK;

@@ -62,6 +62,8 @@
     { "key": "storage.enabled", "scope": { "type": "global", "ref": "*" }, "value": false, "provenance": "proposed", "source": "Storage fees are Reported only; off until ABC confirms (Q4)" },
     { "key": "storage.free_hours", "scope": { "type": "global", "ref": "*" }, "value": 48, "provenance": "proposed", "source": "Set equal to the CONFIRMED 48-hour collection window, so no charge can fall before the collection deadline (Q4)" },
     { "key": "storage.daily_rate_bp", "scope": { "type": "global", "ref": "*" }, "value": 100, "provenance": "benchmark", "source": "Hammer and Tongues charges 1 % a day; inactive while storage.enabled is false (Q4)" },
+    { "key": "logistics.collection_slot", "scope": { "type": "global", "ref": "*" }, "value": { "minutes": 30, "capacity": 6, "bookAheadDays": 7 }, "provenance": "proposed", "source": "Blueprint §6 module 10: collection slots and QR pass; slots cut from branch hours (CONFIRMED 9–3 weekdays, 9–12 Saturdays). Length, capacity and horizon proposed (A50)" },
+    { "key": "logistics.slot_reminder_hours", "scope": { "type": "global", "ref": "*" }, "value": [24, 2], "provenance": "proposed", "source": "Blueprint §6 module 10 with module 11 alerts: remind the buyer before a booked collection slot (A50)" },
 
     { "key": "catalogue.min_photos", "scope": { "type": "global", "ref": "*" }, "value": 4, "provenance": "proposed", "source": "Blueprint principle 6: a standard photo set for every lot; size not specified (A28)" },
     { "key": "catalogue.min_photos", "scope": { "type": "category", "ref": "vehicles" }, "value": 35, "provenance": "benchmark", "source": "Ritchie Bros inspection reports carry at least 35 photos (D2)" },
@@ -86,7 +88,10 @@
     { "key": "operations.outage_extension", "scope": { "type": "global", "ref": "*" }, "value": "outage_plus_soft_close", "provenance": "proposed", "source": "Blueprint §8 clock and connection disputes; docs/01 §10" },
 
     { "key": "dispute.claim_window_hours_after_release", "scope": { "type": "global", "ref": "*" }, "value": 48, "provenance": "proposed", "source": "Blueprint §8 misdescribed lots: a claim window at collection" },
-    { "key": "dispute.response_target_hours", "scope": { "type": "global", "ref": "*" }, "value": 24, "provenance": "proposed", "source": "Blueprint §6 module 12: ticket with an owner and a response target" }
+    { "key": "dispute.response_target_hours", "scope": { "type": "global", "ref": "*" }, "value": 24, "provenance": "proposed", "source": "Blueprint §6 module 12: ticket with an owner and a response target" },
+    { "key": "dispute.decision_target_hours", "scope": { "type": "global", "ref": "*" }, "value": 120, "provenance": "proposed", "source": "Blueprint §6 module 12: disputes with evidence and remedies; a decision within five days of the claim, so the seller's held payout is not delayed for long (A56)" },
+    { "key": "dispute.refund_second_approver_threshold", "scope": { "type": "global", "ref": "*" }, "value": { "USD": 50000, "ZWG": null }, "provenance": "assumption", "source": "Blueprint §8: two-person approval above a set amount; same US$500 as override.two_person_threshold (A15). No ZiG figure, so every ZiG refund needs a second approver until finance sets one (A55)" },
+    { "key": "support.ticket_targets", "scope": { "type": "global", "ref": "*" }, "value": { "urgent": { "firstResponseHours": 1, "resolutionHours": 8 }, "high": { "firstResponseHours": 4, "resolutionHours": 24 }, "normal": { "firstResponseHours": 8, "resolutionHours": 72 }, "low": { "firstResponseHours": 24, "resolutionHours": 120 } }, "provenance": "proposed", "source": "Blueprint §6 module 12: tickets with owners and targets; §9 measure: time to first reply. Figures proposed, in clock hours (A56)" }
   ],
   "taxRates": [
     { "taxCode": "purchasers_levy", "taxClass": "goods_standard", "currency": "USD", "rateBp": 1500, "base": "hammer", "effectiveFrom": "2026-01-01T00:00:00+02:00", "active": false, "provenance": "benchmark", "source": "Hammer and Tongues: 15 % purchaser's levy (blueprint §7). Placeholder, inactive until finance confirms (Q9)" },

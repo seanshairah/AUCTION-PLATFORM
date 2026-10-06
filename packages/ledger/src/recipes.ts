@@ -53,7 +53,10 @@ export type JournalKind =
   | 'payout'
   | 'gateway_settlement'
   | 'reversal'
-  | 'adjustment';
+  | 'adjustment'
+  | 'storage_fee'
+  | 'delivery_charge'
+  | 'clawback';
 
 export interface JournalLine {
   account: AccountRef;
@@ -354,6 +357,123 @@ export function refundToWallet(p: { disputeId: string; buyerId: string; currency
     lines: [
       { account: p.fundedBy === 'platform' ? platform('suspense') : seller(p.fundedBy.sellerId), amountMinor: a },
       { account: customer(p.buyerId, 'wallet_available'), amountMinor: -a },
+    ],
+  });
+}
+
+/**
+ * Full refund and return after an upheld claim (docs/17 §6): the sale of one lot is
+ * unwound. The buyer gets back everything the invoice charged for that lot. The
+ * seller's net share (hammer less commission) comes out of their payable, or out of
+ * platform suspense once they have been paid, to be clawed back. ABC gives back its
+ * commission, and the tax, premium and delivery credits made at issue are reversed.
+ */
+export function fullRefundAndReturn(p: {
+  disputeId: string;
+  buyerId: string;
+  sellerId: string;
+  currency: Currency;
+  hammerMinor: bigint;
+  commissionMinor: bigint;
+  /** The lot's other invoice lines (taxes, premium, delivery), reversed account by account. */
+  otherLines: ReadonlyArray<{ type: Exclude<InvoiceLineForLedger['type'], 'hammer'>; amountMinor: bigint }>;
+  fundedBy: 'seller' | 'platform';
+}): JournalSpec {
+  const hammer = positive(p.hammerMinor, 'Hammer');
+  if (p.commissionMinor < 0n || p.commissionMinor > hammer) throw new RangeError('Commission must be between 0 and the hammer');
+  const share = hammer - p.commissionMinor;
+  const reversed: JournalLine[] = p.otherLines.map((l) => {
+    switch (l.type) {
+      case 'buyers_premium':
+        return { account: platform('fee_income', 'buyers_premium'), amountMinor: l.amountMinor };
+      case 'delivery':
+        return { account: platform('delivery_income'), amountMinor: l.amountMinor };
+      default:
+        return { account: platform('tax_payable', l.type), amountMinor: l.amountMinor };
+    }
+  });
+  const total = hammer + p.otherLines.reduce((a, l) => a + l.amountMinor, 0n);
+  return journal({
+    kind: 'refund',
+    currency: p.currency,
+    idempotencyKey: `dispute:${p.disputeId}:refund`,
+    description: 'Full refund after an upheld claim; lot returned to the seller',
+    referenceType: 'dispute',
+    referenceId: p.disputeId,
+    lines: [
+      { account: p.fundedBy === 'platform' ? platform('suspense') : seller(p.sellerId), amountMinor: share },
+      { account: platform('commission_income'), amountMinor: p.commissionMinor },
+      ...reversed,
+      { account: customer(p.buyerId, 'wallet_available'), amountMinor: -total },
+    ],
+  });
+}
+
+/**
+ * Recovers part of a clawback from a seller's later proceeds (docs/17 §6): the seller's
+ * payable goes down by what ABC fronted, and platform suspense is repaid.
+ */
+export function clawbackRecovery(p: { clawbackId: string; payoutId: string; sellerId: string; currency: Currency; amountMinor: bigint }): JournalSpec {
+  const a = positive(p.amountMinor, 'Clawback recovery');
+  return journal({
+    kind: 'clawback',
+    currency: p.currency,
+    idempotencyKey: `clawback:${p.clawbackId}:payout:${p.payoutId}`,
+    description: 'Clawback recovered from a later payout',
+    referenceType: 'clawback',
+    referenceId: p.clawbackId,
+    lines: [
+      { account: seller(p.sellerId), amountMinor: a },
+      { account: platform('suspense'), amountMinor: -a },
+    ],
+  });
+}
+
+// --- Logistics charges ---------------------------------------------------------------
+
+/** Storage for goods left past the free period, paid from the wallet at release (docs/15 §5). */
+export function storageFee(p: { collectionId: string; buyerId: string; currency: Currency; amountMinor: bigint; days: number }): JournalSpec {
+  const a = positive(p.amountMinor, 'Storage fee');
+  return journal({
+    kind: 'storage_fee',
+    currency: p.currency,
+    idempotencyKey: `collection:${p.collectionId}:storage`,
+    description: `Storage, ${p.days} day${p.days === 1 ? '' : 's'}`,
+    referenceType: 'collection',
+    referenceId: p.collectionId,
+    lines: [
+      { account: customer(p.buyerId, 'wallet_available'), amountMinor: a },
+      { account: platform('fee_income', 'storage'), amountMinor: -a },
+    ],
+  });
+}
+
+/**
+ * Door delivery booked after payment, paid from the wallet (docs/15 §6). The lines are
+ * the delivery lines quoteLot produced (the charge and any tax on it), so the bill
+ * equals the quote the buyer saw.
+ */
+export function deliveryCharge(p: {
+  deliveryId: string;
+  buyerId: string;
+  currency: Currency;
+  lines: ReadonlyArray<{ type: 'delivery' | 'purchasers_levy' | 'vat' | 'imtt' | 'transfer_tax'; amountMinor: bigint }>;
+}): JournalSpec {
+  const total = p.lines.reduce((a, l) => a + l.amountMinor, 0n);
+  positive(total, 'Delivery charge');
+  return journal({
+    kind: 'delivery_charge',
+    currency: p.currency,
+    idempotencyKey: `delivery:${p.deliveryId}:charge`,
+    description: 'Door delivery',
+    referenceType: 'delivery',
+    referenceId: p.deliveryId,
+    lines: [
+      { account: customer(p.buyerId, 'wallet_available'), amountMinor: total },
+      ...p.lines.map((l) => ({
+        account: l.type === 'delivery' ? platform('delivery_income') : platform('tax_payable', l.type),
+        amountMinor: -l.amountMinor,
+      })),
     ],
   });
 }

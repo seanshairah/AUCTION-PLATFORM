@@ -28,6 +28,7 @@ import {
   type LadderStep,
   type SoldLot,
 } from './settlement';
+import { applyClawbacks } from './payout-adjust';
 
 /**
  * Close and settlement service (docs/11-close-settlement.md): invoices at the hammer,
@@ -44,7 +45,19 @@ export type PayResult =
 
 export type ReleaseResult =
   | { released: true; collectionId: string; payouts: string[]; payoutsBlocked: Array<{ sellerId: string; reason: string }> }
-  | { released: false; reason: 'invalid_pass' | 'not_ready' | 'title_incomplete' };
+  | { released: false; reason: 'invalid_pass' | 'not_ready' | 'title_incomplete' }
+  | { released: false; reason: 'charges_due'; amountMinor: bigint; currency: Currency };
+
+/**
+ * Runs inside the release transaction, after the collection is locked and before the
+ * goods are released (deliverable 15: storage charged at the gate, courier hand-over).
+ * Returning `chargesDueMinor` refuses the release and nothing is written.
+ */
+export type ReleaseCheck = (
+  c: Client,
+  collection: { id: string; invoiceId: string; buyerId: string; currency: Currency },
+  now: Date,
+) => Promise<{ chargesDueMinor: bigint } | null>;
 
 async function outbox(c: Client, topic: string, aggregateType: string, aggregateId: string, payload: unknown): Promise<void> {
   await c.query('INSERT INTO core.outbox (topic, aggregate_type, aggregate_id, payload) VALUES ($1, $2, $3, $4::jsonb)', [
@@ -253,18 +266,34 @@ export class SettlementService {
   }
 
   /** Staff scan the QR pass at the gate. Vehicles are refused until their title case is complete. */
-  async releaseAtGate(staff: Actor & { type: 'staff' }, token: string, now: Date = new Date()): Promise<ReleaseResult> {
+  async releaseAtGate(staff: Actor & { type: 'staff' }, token: string, now: Date = new Date(), check?: ReleaseCheck): Promise<ReleaseResult> {
+    return this.release(staff, 'qr_token_hmac = $1', hashGatePass(token, this.options.gatePassSecret), now, check);
+  }
+
+  /**
+   * Releases a collection by id, without the buyer's QR pass: used when ABC staff hand
+   * goods to a courier the buyer booked (deliverable 15). Same checks and payouts.
+   */
+  async releaseCollection(staff: Actor & { type: 'staff' }, collectionId: string, now: Date = new Date(), check?: ReleaseCheck): Promise<ReleaseResult> {
+    return this.release(staff, 'id = $1', collectionId, now, check);
+  }
+
+  private async release(staff: Actor & { type: 'staff' }, where: string, key: unknown, now: Date, check?: ReleaseCheck): Promise<ReleaseResult> {
     try {
-      return await this.db.tx(staff, async (c) => {
+      return await this.db.tx(staff, async (c): Promise<ReleaseResult> => {
         const col = await c.query<{ id: string; status: string; invoice_id: string }>(
-          'SELECT id, status, invoice_id FROM logistics.collection WHERE qr_token_hmac = $1 FOR UPDATE',
-          [hashGatePass(token, this.options.gatePassSecret)],
+          `SELECT id, status, invoice_id FROM logistics.collection WHERE ${where} FOR UPDATE`,
+          [key],
         );
         const collection = col.rows[0];
         if (!collection) return { released: false, reason: 'invalid_pass' } as const;
         if (collection.status !== 'ready' && collection.status !== 'scheduled') return { released: false, reason: 'not_ready' } as const;
 
         const invoice = await this.lockInvoice(c, collection.invoice_id);
+        if (check) {
+          const due = await check(c, { id: collection.id, invoiceId: invoice.id, buyerId: invoice.buyer_account_id, currency: invoice.currency }, now);
+          if (due) throw new ChargesDue(due.chargesDueMinor, invoice.currency);
+        }
         const snapshot = await this.rulebook.snapshot(invoice.rule_version_id, c);
         const lots = await c.query<{ lot_id: string; seller_account_id: string; hammer: bigint }>(
           `SELECT cl.lot_id, l.seller_account_id, il.amount_minor AS hammer
@@ -314,12 +343,15 @@ export class SettlementService {
               [p.rows[0]!.id, l.lotId, invoice.id, l.type, l.type === 'hammer' ? 'Hammer price' : 'Commission', big(l.amount)],
             );
           }
-          await outbox(c, 'payout.scheduled', 'payout', p.rows[0]!.id, { sellerId, netMinor: gross - deductions });
+          // A seller who owes a clawback from an earlier upheld claim repays it from this payout (deliverable 17).
+          const recovered = await applyClawbacks(c, sellerId, invoice.currency, p.rows[0]!.id);
+          await outbox(c, 'payout.scheduled', 'payout', p.rows[0]!.id, { sellerId, netMinor: gross - deductions - recovered });
           payouts.push(p.rows[0]!.id);
         }
         return { released: true, collectionId: collection.id, payouts, payoutsBlocked: blocked } as const;
       });
     } catch (e) {
+      if (e instanceof ChargesDue) return { released: false, reason: 'charges_due', amountMinor: e.amount, currency: e.currency };
       if ((e as Error).message?.includes('title case is not complete')) return { released: false, reason: 'title_incomplete' };
       throw e;
     }
@@ -455,6 +487,15 @@ export class SettlementService {
     const journalId = await postJournal(c, invoiceCredit(issued, invoice.id));
     await c.query(`UPDATE settlement.invoice SET status = 'defaulted' WHERE id = $1`, [invoice.id]);
     return journalId;
+  }
+}
+
+class ChargesDue extends Error {
+  constructor(
+    readonly amount: bigint,
+    readonly currency: Currency,
+  ) {
+    super('charges due before release');
   }
 }
 

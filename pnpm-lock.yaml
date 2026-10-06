@@ -47,6 +47,9 @@ importers:
       '@abc/limits':
         specifier: workspace:*
         version: link:../../packages/limits
+      '@abc/logistics':
+        specifier: workspace:*
+        version: link:../../packages/logistics
       '@abc/payments':
         specifier: workspace:*
         version: link:../../packages/payments
@@ -62,6 +65,9 @@ importers:
       '@abc/settlement':
         specifier: workspace:*
         version: link:../../packages/settlement
+      '@abc/support':
+        specifier: workspace:*
+        version: link:../../packages/support
       '@abc/vehicles':
         specifier: workspace:*
         version: link:../../packages/vehicles
@@ -233,6 +239,40 @@ importers:
         specifier: ^8.23.1
         version: 8.23.1
 
+  packages/logistics:
+    dependencies:
+      '@abc/db':
+        specifier: workspace:*
+        version: link:../db
+      '@abc/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@abc/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@abc/limits':
+        specifier: workspace:*
+        version: link:../limits
+      '@abc/quote':
+        specifier: workspace:*
+        version: link:../quote
+      '@abc/rules':
+        specifier: workspace:*
+        version: link:../rules
+      '@abc/settlement':
+        specifier: workspace:*
+        version: link:../settlement
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@abc/bidding':
+        specifier: workspace:*
+        version: link:../bidding
+      '@abc/payments':
+        specifier: workspace:*
+        version: link:../payments
+
   packages/payments:
     dependencies:
       '@abc/db':
@@ -326,6 +366,34 @@ importers:
       pg:
         specifier: ^8.23.1
         version: 8.23.1
+
+  packages/support:
+    dependencies:
+      '@abc/db':
+        specifier: workspace:*
+        version: link:../db
+      '@abc/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@abc/ledger':
+        specifier: workspace:*
+        version: link:../ledger
+      '@abc/rules':
+        specifier: workspace:*
+        version: link:../rules
+      '@abc/settlement':
+        specifier: workspace:*
+        version: link:../settlement
+      '@abc/vehicles':
+        specifier: workspace:*
+        version: link:../vehicles
+      pg:
+        specifier: ^8.23.1
+        version: 8.23.1
+    devDependencies:
+      '@abc/logistics':
+        specifier: workspace:*
+        version: link:../logistics
 
   packages/vehicles:
     dependencies:
