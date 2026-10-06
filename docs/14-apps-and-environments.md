@@ -45,6 +45,7 @@ Money always travels as `{ minor: "1910000", currency: "USD", text: "US$19,100.0
 | `GET /seller/valuation`, `GET /seller/proceeds` | required | Valuation range from past sales; the published commission calculator |
 | `POST /seller/bulk` | required | Institutional CSV upload: all or nothing, idempotent per batch |
 | `GET /session/demo-accounts`, `POST /session/demo`, `POST /session/sign-out` | — | Demo sign-in (§3) |
+| `POST /auth/otp/start`, `/auth/otp/verify`; `GET/PUT /me/preferences`; `GET /me/notifications`, `POST /me/notifications/:id/read`; `GET/POST /webhooks/whatsapp`, `POST /webhooks/sms-status` | varies | Sign-in by one-time code, preference centre, in-app feed and provider webhooks ([16 §11](16-communications.md#11-api-worker-and-configuration)) |
 
 Requests are validated with zod; a bad query is a 400 with a readable message.
 
@@ -52,7 +53,7 @@ Requests are validated with zod; a bad query is a 400 with a readable message.
 
 A session is an HttpOnly, SameSite=Lax cookie holding `accountId.expiry.HMAC-SHA256`. It is signed with `SESSION_SECRET` (32+ characters, required in production), lasts 12 hours, and is `Secure` outside development and test.
 
-Real sign-in (email and phone one-time codes, then KYC for full verification) belongs to the identity module and is not built yet. Until then, development and staging can set `DEMO_SIGN_IN=1` to sign in as one of the demo bidders (**A42**). The flag is refused in production. Only accounts with the demo email domain can sign in this way, and everything after sign-in is the production path.
+Sign-in by one-time code to a phone or email address is built ([16 §9](16-communications.md#9-sign-in-by-one-time-code)) and sets this same cookie; KYC for full verification is not built yet. Meanwhile, development and staging can set `DEMO_SIGN_IN=1` to sign in as one of the demo bidders (**A42**). The flag is refused in production. Only accounts with the demo email domain can sign in this way, and everything after sign-in is the production path.
 
 ## 4. Database connection and migrations
 
@@ -81,6 +82,7 @@ Refusals:
 | `0001_vehicle_body_and_drive` | `catalogue.vehicle.body_style` and `drive` (with checks) for the dashboard filters; index on make and model. `VehicleService.setDetails` now records fuel, transmission, colour, body style and drive |
 | `0003_logistics_support` | Slot bookings, storage charges, deliveries and their events ([15](15-logistics.md)); claim decisions, tickets and messages, payout holds and clawbacks ([17](17-support-disputes.md)); journal kinds `storage_fee`, `delivery_charge`, `clawback`; lot transition `paid_out → refunded` |
 | `0004_admin_analytics` | Admin and operations ([18](18-admin-operations.md)) and analytics ([19](19-analytics.md)): override payload, lapse and guarded transitions; tax activation by override; warning acknowledgements and one effective rule set; `write_off` expense account; staff registration decisions; default appeals and waivers; reconciliation resolutions; schema `analytics` (measure functions and the baseline) |
+| `0002_comms_identity` | One-time code challenges (`identity.otp_challenge`); message delivery fields, fallbacks, quiet-hours scheduling and the in-app feed on `comms.message`; template subjects and the GSM-7 check; preference categories with a channel always kept for money messages; inbound WhatsApp messages and chat conversations; the seeded template library ([16](16-communications.md)) |
 
 ## 5. Demo data
 

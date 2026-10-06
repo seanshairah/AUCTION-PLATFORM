@@ -6,12 +6,15 @@ import { LogisticsService } from '@abc/logistics';
 import { SettlementService } from '@abc/settlement';
 import { SupportService } from '@abc/support';
 import { VehicleService } from '@abc/vehicles';
+import { buildCommsRuntime } from './comms/runtime';
 
 /**
  * The worker: closes lots whose (possibly extended) end time has passed, issues
- * invoices for auctions that have fully closed, and queues payment reminders.
- * It also keeps collection slots generated, queues slot reminders and flags missed
- * ticket and claim deadlines (deliverables 15 and 17). Each step is idempotent, so running two workers or restarting one is safe.
+ * invoices for auctions that have fully closed, queues payment reminders, ending-soon
+ * and overdue-title alerts, and dispatches messages (docs/16). It also keeps collection
+ * slots generated, queues slot reminders and flags missed ticket and claim deadlines
+ * (deliverables 15 and 17), and lapses override requests and retires superseded rule
+ * sets (deliverable 18). Each step is idempotent, so running two workers or restarting one is safe.
  * Usage: pnpm --filter @abc/api worker [--once]
  */
 loadDotEnv();
@@ -23,6 +26,8 @@ const admin = createAdminServices(db, rulebook, { registrations, bidding });
 const gatePassSecret = process.env.GATE_PASS_SECRET ?? (process.env.APP_ENV === 'production' ? '' : 'dev-only-gate-pass-secret');
 if (!gatePassSecret) throw new Error('GATE_PASS_SECRET is required in production.');
 const settlement = new SettlementService(db, rulebook, { gatePassSecret });
+const vehicles = new VehicleService(db, rulebook);
+const comms = buildCommsRuntime(db, rulebook);
 const intervalMs = Number(process.env.WORKER_INTERVAL_MS ?? 5_000);
 
 export async function tick(now = new Date()): Promise<void> {
@@ -43,7 +48,13 @@ export async function tick(now = new Date()): Promise<void> {
   if (lapsed) console.log(`${lapsed} override request(s) lapsed`);
   const retired = await admin.rulebook.retireSuperseded(now);
   if (retired.length) console.log(`retired superseded rule set(s): ${retired.join(', ')}`);
+  await vehicles.alertOverdueTitleSteps(now);
+  await comms.endingSoon.queue(now);
+  await comms.intake.resumeSubmissions(now);
   await logisticsAndSupportTick(now);
+  // Last, so messages raised by every step above go out in the same tick.
+  const sent = await comms.dispatcher.run(now);
+  if (sent.queued || sent.sent || sent.failed) console.log(`messages: ${sent.queued} queued, ${sent.sent} sent, ${sent.failed} failed, ${sent.fallbacks} fallbacks`);
 }
 
 // Deliverables 15 and 17: collection slots (hourly), slot reminders, ticket and claim deadline flags.

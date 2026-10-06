@@ -202,6 +202,11 @@ export class RegistrationService {
         firstHoldId,
       ],
     );
+    // The bidder hears "registered" or "being checked" (communications, docs/16 §4).
+    await c.query(`INSERT INTO core.outbox (topic, aggregate_type, aggregate_id, payload) VALUES ('registration.decided', 'registration', $1, $2::jsonb)`, [
+      registrationId,
+      JSON.stringify({ accountId: req.accountId, auctionId: req.auctionId, status: decision.status }),
+    ]);
     return { registrationId, decision, limits, alreadyRegistered: false };
   }
 

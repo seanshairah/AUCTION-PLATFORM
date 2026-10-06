@@ -14,6 +14,7 @@ import { SellerController } from './seller/seller.controller';
 import { ViewingsController } from './lots/viewings.controller';
 import { ADMIN_CONTROLLERS, ADMIN_PROVIDERS } from './admin';
 import { AccountController } from './bidding/account.controller';
+import { COMMS_CONTROLLERS, commsProviders } from './comms';
 import { BidDesk } from './bidding/bid-desk';
 import { jsonReplacer } from './http';
 import { logisticsAndSupport } from './logistics/module';
@@ -63,7 +64,7 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
   const logisticsSupport = logisticsAndSupport(db, rulebook, { ...process.env, GATE_PASS_SECRET: config.gatePassSecret });
   return {
     module: ApiModule,
-    controllers: [LotsController, AuctionsController, AccountController, SystemController, MoneyController, SellerController, ViewingsController, ...logisticsSupport.controllers, ...ADMIN_CONTROLLERS],
+    controllers: [LotsController, AuctionsController, AccountController, SystemController, MoneyController, SellerController, ViewingsController, ...logisticsSupport.controllers, ...ADMIN_CONTROLLERS, ...COMMS_CONTROLLERS],
     providers: [
       { provide: CONFIG, useValue: config },
       { provide: DB, useValue: db },
@@ -77,11 +78,13 @@ function apiModule(db: Db, config: ApiConfig): DynamicModule {
       { provide: VEHICLES, useValue: new VehicleService(db, rulebook) },
       ...logisticsSupport.providers,
       ...ADMIN_PROVIDERS,
+      ...commsProviders(db, rulebook),
     ],
   };
 }
 
 export async function createApp(db: Db, config: ApiConfig): Promise<INestApplication> {
+  // rawBody: provider webhooks are verified against the exact bytes received (docs/16).
   const app = await NestFactory.create(apiModule(db, config), { logger: ['error', 'warn'], rawBody: true });
   const express = app.getHttpAdapter().getInstance();
   express.set('json replacer', jsonReplacer);

@@ -1,0 +1,291 @@
+# 16 — Communications Layer
+
+| | |
+|---|---|
+| Phase | 5 — Reach (deliverable 16), with sign-in by one-time code for the identity module (module 1) |
+| Source of truth | Blueprint §6 module 11 ("WhatsApp templates first, push and SMS fallback, email as the record", preference centre), §7 ("WhatsApp is where people read messages"; weak connections, costly data), §6 module 1 (email and phone OTP), §8 (shill bidding: linked accounts), D4 in the [register](00-assumptions-register.md#part-c--differences-between-the-build-brief-and-the-blueprint-resolved) |
+| Code | [`packages/comms`](../packages/comms/src): `library.ts` (templates), `render.ts`, `channel.ts` (`MessageChannel`, registry), `adapters/` (fake, WhatsApp Cloud API, HTTP SMS, email, in-app), `topics.ts` (who hears what), `dispatcher.ts`, `policy.ts` (fallback, preferences, quiet hours), `preferences.ts`, `feed.ts`, `ending-soon.ts`, `whatsapp-intake.ts` · [`packages/identity`](../packages/identity/src): `contact.ts`, `otp.ts`, `service.ts` (`IdentityService`, `OtpCodeSource`) · API: [`apps/api/src/comms`](../apps/api/src/comms), [`apps/api/src/auth`](../apps/api/src/auth) · schema: migration [`0002_comms_identity`](../db/migrations/0002_comms_identity.sql), folded into [`db/schema.sql`](../db/schema.sql) (`comms.*`, `identity.otp_challenge`) |
+| Related | [01 Architecture §7.2](01-solution-architecture.md#72-messagechannel) (the interface) · [11 Close and settlement](11-close-settlement.md) (reminders, default ladder) · [12 Seller portal](12-seller-portal.md) (WhatsApp intake) · [14 Apps](14-apps-and-environments.md#3-sessions-and-sign-in) (sessions) |
+
+## 1. Purpose
+
+ABC's buyers and sellers read WhatsApp first (blueprint §7). Today nothing tells a bidder they have been outbid, that their invoice is ready, or that their goods can be collected, unless they open the app. Sellers hear nothing until they phone. This layer sends every person the message they need, on the channel they read, once, and keeps a record of what they were told. It also signs people in with a one-time code to their phone or email, which the identity module needed before anyone could use the System for real.
+
+**Acceptance test.** Winners hear about their invoice and payment deadline within minutes on WhatsApp, with SMS as the fallback, which shortens the time to payment and so the seller's time to cash. Bidders hear when they are outbid or a lot is about to close, and every message about money is also on record in the app and by email, which lowers regret.
+
+## 2. What people hear, and when
+
+Each outbox event below becomes one message per person and channel. Message keys name the business event, so the same event written twice is still one message (R4).
+
+| Outbox topic (emitted by) | Who | Template | Preference category |
+|---|---|---|---|
+| `bid.outbid` (bidding) | The bidder who lost the lead | `outbid` | outbid |
+| `lot.ending_soon` (comms, `EndingSoonAlerts`) | Everyone who bid on the lot, `comms.ending_soon_minutes` before it closes | `ending_soon_leading` / `ending_soon_watching` | ending_soon |
+| `lot.closed` (bidding) | Winner; every other bidder | `won`; `lost` | auction_results |
+| `invoice.issued` (settlement) | Buyer | `invoice_issued` | payments |
+| `invoice.reminder` (settlement, 12 h and 36 h) | Buyer | `payment_reminder`; the last offset uses `payment_reminder_final` | payments |
+| `invoice.paid` (settlement) | Buyer | `payment_received` | payments |
+| `collection.ready` (settlement) | Buyer, unless a vehicle on the invoice is waiting for its papers | `gate_pass_ready` | collection |
+| `default.warning` (settlement) | Buyer | `default_warning` | payments |
+| `lot.relist_required` (settlement, deposit-forfeit step) | Buyer | `deposit_forfeited` (with the amount), or `invoice_cancelled` if no deposit was held | payments |
+| `title.step_overdue` (vehicles) | The step's owner, or every `vehicle_desk` staff member | `title_step_overdue` | staff_tasks |
+| `title.complete` (vehicles) | Buyer | `title_complete` | collection |
+| `payout.scheduled`, `payout.paid`, `payout.blocked` (settlement) | Seller | `payout_scheduled`, `payout_paid`, `payout_blocked` | selling |
+| `registration.decided` (limits, added with this deliverable) | Bidder | `registration_approved` / `registration_review` | account |
+| `otp.requested` (identity) | Whoever asked for the code | `otp_code` | none: cannot be switched off |
+| `consignment.received` (comms, WhatsApp intake) | Seller | `consignment_received` | selling |
+| `chat.reply` (comms, WhatsApp intake) | The person chatting | `chat_reply` | none: a reply in the chat |
+
+Every other topic (`bid.accepted`, `auction.opened`, `account.created` and so on) is left undispatched for its own consumer, such as analytics (§4).
+
+## 3. Templates
+
+The library is code ([`library.ts`](../packages/comms/src/library.ts)) and data: the same rows are seeded as `approved` in [`db/seed.sql`](../db/seed.sql) and migration 0002, generated by `pnpm --filter @abc/comms templates:sql`. A test fails if the SQL and the code ever differ.
+
+- **One text per event.** It is used for WhatsApp, SMS, push and the in-app feed, so an event reads the same everywhere (docs/01 §6.6). Email gets a subject and a slightly longer body with a standard footer pointing at the message settings.
+- **Plain and short.** British English, no exclamation marks, no "please be advised". A test checks the copy.
+- **Placeholders are `{{name}}`.** Rendering is pure. A placeholder with no value (or a blank one) is an error, never a blank: "Invoice  is due" is worse than nothing.
+- **SMS is one segment.** Every SMS template uses only GSM-7 characters (the database checks this with `comms.is_gsm7`). At send time, values are made GSM-safe (curly quotes become straight ones, accents are dropped where GSM has no letter), and if the result is over 160 characters the longest free-text value (a lot title, branch or auction name) is shortened with "...". Links, codes, amounts and dates are never shortened; if they alone don't fit, the send fails as permanent and the next channel is tried. A test renders every template with realistic values and checks each SMS fits.
+- **Versions.** An approved template never changes: the database refuses edits and deletes. New copy is a new version, so every sent message still points at the words it used.
+- **WhatsApp names.** Each template is submitted to Meta as `abc_<key>_v<version>`, with the body from `metaTemplateBody` (named placeholders become `{{1}}`, `{{2}}`, … in order). The sign-in code must be approved as an AUTHENTICATION template (A43). Chat replies are session messages inside WhatsApp's 24-hour window, not templates.
+
+## 4. The dispatcher
+
+`Dispatcher.run(now)` does three things, each safe to repeat and to run in several processes at once:
+
+1. **Plan.** In one transaction it claims up to 100 undispatched outbox rows whose topic it knows, with `FOR UPDATE SKIP LOCKED`. For each it asks the topic's planner who to tell and with what values, inserts `comms.message` rows with `ON CONFLICT DO NOTHING`, and marks the outbox row dispatched. A planner that fails rolls back to a savepoint and increments `attempts`; after `comms.retry.outboxAttempts` (5) the row is left undispatched for staff to look at.
+2. **Fall back on timeouts.** Messages `sent` but not delivered by their `fallback_due_at` get the next channel queued (§5).
+3. **Send.** Queued messages due now are claimed with a lease (`next_attempt_at = now + leaseSeconds`, `FOR UPDATE SKIP LOCKED`), sent **outside any transaction** (docs/01 §6.1), and the outcome recorded afterwards. Adapters time out after 15 seconds, well inside the 60-second lease, so another dispatcher cannot pick up a send still in flight.
+
+**Only known topics are claimed.** The outbox has one `dispatched_at` column. Rather than mark events it does not handle (which another consumer may need), the dispatcher claims only its own topics. When a second consumer arrives, dispatch should move to per-consumer cursors (open item).
+
+**Ending soon.** No module emitted an "ending soon" event, so `EndingSoonAlerts.queue(now)` (run by the worker) writes one `lot.ending_soon` event per lot and bidder when the lot is within `comms.ending_soon_minutes` of its current end, using the auction's pinned rule set (A20). There is no watch list yet; when the catalogue adds one, watchers join the same query.
+
+**Messages that are no longer useful are not sent.** Each message can carry `expires_at`: the lot's end time for outbid and ending-soon alerts, the due time for payment reminders, the code's expiry for sign-in codes. A message still queued after that is marked `suppressed` with reason `expired`.
+
+**Nobody reachable.** If no channel is allowed (no consent, everything switched off, no address), the dispatcher still writes one `suppressed` row with the reason, so "was this person told?" always has an answer. In practice the in-app feed always gets a copy for account holders.
+
+## 5. Channels and fallback
+
+The interface is exactly the one in [01 §7.2](01-solution-architecture.md#72-messagechannel):
+
+```ts
+interface MessageChannel {
+  channel: 'whatsapp' | 'push' | 'sms' | 'email' | 'in_app';
+  send(msg: { messageId: string; recipient: Recipient; templateKey: string; templateVersion: number;
+              locale: string; params: Record<string, string> }): Promise<{ providerMessageId: string }>;
+  parseStatusWebhook(headers: Record<string, string>, rawBody: Buffer): DeliveryStatus | null;
+}
+```
+
+A `ChannelRegistry` maps each channel to one provider. A channel with no provider is skipped in the fallback order.
+
+| Adapter | Status | Notes |
+|---|---|---|
+| `FakeChannel` | Tests and demo | Renders exactly like a real adapter, records each send, can be scripted to fail (permanent or temporary). Used for every channel outside production when no credentials are set |
+| `WhatsAppCloudChannel` | **UNVERIFIED (A43)** | Meta Graph `POST /{phone-number-id}/messages` with template messages (body parameters in placeholder order; authentication template with copy-code button for codes); webhooks verified with `X-Hub-Signature-256` over the raw body; the `hub.verify_token` handshake; statuses and inbound text and image messages parsed. Rate limits and Meta's temporary error codes are retried; others move to the next channel |
+| `HttpSmsChannel` | **UNVERIFIED (A44)** | Generic JSON-over-HTTPS aggregator: configurable field names, response id path, sender id; delivery reports signed with HMAC-SHA256 of the raw body; status words mapped (DELIVRD, UNDELIV and the like) |
+| `EmailChannel` + `EmailTransport` | No provider yet (A48) | Renders subject and body and hands them to a transport. `LogEmailTransport` logs the recipient and subject (never the body, which may hold a code). In production email is registered only when a provider transport exists, or `EMAIL_TRANSPORT=log` is set deliberately |
+| `InAppChannel` | Built | Nothing leaves the System: the message row is the notification, marked `delivered` at once |
+| Push | No provider yet (A48) | A fake outside production; not registered in production |
+
+**Fallback order** comes from rule `comms.fallback` (PROPOSED):
+
+| Policy | Order | Fall back after |
+|---|---|---|
+| outbid | WhatsApp → push → SMS | 2 min |
+| ending_soon | WhatsApp → push | 2 min |
+| won, invoice | WhatsApp → push → SMS | 5 min |
+| lost | WhatsApp → push | 10 min |
+| payment_reminder, default | WhatsApp → SMS | 10 min |
+| collection_ready, payout, consignment | WhatsApp → push → SMS | 10 min |
+| registration | WhatsApp → push | 5 min |
+| staff_task | push → WhatsApp → SMS | 15 min |
+| otp | WhatsApp → SMS | 30 s (email codes go by email only) |
+
+The next channel is queued, linked by `fallback_of`, when:
+- a send fails permanently (bad number, template not approved, too long for one SMS)
+- a temporary failure is still failing after `comms.retry.sendAttempts` (3) tries, waiting `backoffSeconds` (30 s, then 5 min) between them
+- a delivery report says `failed`
+- the message was sent but no delivered or read report arrived within the policy's timeout
+
+Channels already used for the same message and person are skipped, and the database checks that a fallback is the same message to the same person on a different channel.
+
+**Email as the record.** Transactional messages (won, invoices, reminders, payments, gate pass, default, payouts, registration, consignment, staff tasks) also go by email when the person has an email address, consent and email switched on for that category. Alerts (outbid, ending soon, lost) do not.
+
+**Delivery status.** `Dispatcher.recordStatus(provider, status)` finds the message by provider and provider id (unique in the database) and only moves it forward: queued → sent → delivered → read. A late "sent" after "delivered" changes nothing. The database refuses backwards moves too. Delivered or read cancels the pending fallback.
+
+## 6. Preferences and consent
+
+Two separate things decide whether a channel may be used:
+
+| | Legal consent | Preference |
+|---|---|---|
+| Table | `identity.contact_consent` (account, channel) | `comms.preference` (account, category, channel) |
+| Meaning | May ABC contact this person on this channel at all? | Does the person want this kind of message on this channel? |
+| Set | At sign-up (the form's ticks, source `signup_form`), and later by opt-in or opt-out | In the preference centre (`GET/PUT /me/preferences`) |
+| Default | No row = no consent (A46) | Rule `comms.preference_defaults` |
+
+Default preferences (A48):
+
+| Category | WhatsApp | Push | SMS | Email |
+|---|---|---|---|---|
+| outbid | on | on | on | off |
+| ending_soon | on | on | off | off |
+| auction_results, payments, collection, selling, account, staff_tasks | on | on | on | on |
+| marketing (news and offers) | off | off | off | off |
+
+- **Marketing is off by default.** The rulebook refuses a rule set that turns it on by default.
+- **Transactional categories cannot be fully switched off.** At least one of the four channels stays on: the service refuses the change with `needs_a_channel`, and a database trigger refuses four explicit "off" rows for those categories. The in-app feed always has a copy as well.
+- **Sign-in codes and chat replies ignore preferences and prior consent.** The person asked for the code, or wrote to us, at that address.
+- **Every preference change is audited** with its category and channel.
+
+## 7. Quiet hours
+
+Rule `comms.quiet_hours`: 21:00 to 07:00, Africa/Harare (A45). During quiet hours a message on a channel that buzzes a phone (WhatsApp, SMS, push) is queued with `next_attempt_at` at 07:00. Exceptions, because they cannot wait:
+
+- sign-in codes and chat replies (the person is waiting)
+- alerts that would be useless by 07:00: an outbid or ending-soon alert for a lot that closes before quiet hours end
+- silent channels: the in-app feed and email are never held
+
+Payment reminders and default warnings are held: the pay window is 48 hours, and a 07:00 message is read sooner than a midnight one. Times in messages ("Thu 8 Oct, 14:30") use the same time zone.
+
+## 8. In-app notification feed
+
+The feed is the person's `in_app` messages, newest first, rendered from the same templates. No new table: `comms.message` gained `read_at`. `GET /me/notifications` returns items (kind, title, text, time, read) and the unread count; `POST /me/notifications/:id/read` marks one read (idempotent; another person's id is a 404).
+
+## 9. Sign-in by one-time code
+
+New code lives in its own package, [`packages/identity`](../packages/identity/src), because sign-in is the identity module's job (docs/01 §4.1). Identity never calls communications: it writes an `otp.requested` outbox event, and the dispatcher sends the code. Communications depends on identity only to derive the code at send time. That keeps the dependency graph in docs/01 §4.2.
+
+**Start** (`POST /auth/otp/start {contact}`):
+1. The contact is read: an email (trimmed, lower-cased) or a phone number. Zimbabwe numbers typed locally become E.164 (`077 123 4567`, `0771234567`, `263771234567`, `+263 077…` all become `+263771234567`). Zimbabwe numbers must be mobiles (71, 73, 77, 78); other countries are accepted in E.164 (A47).
+2. Rate limits from rule `identity.otp_rate_limits`: 5 new codes per contact and 20 per network address per hour. The address is stored only as a keyed hash.
+3. If a live code exists for that contact, asking again resends **the same code** once `identity.otp_resend_cooldown_seconds` (60) has passed, up to `identity.otp_max_sends` (3) times. After that a new code replaces it. There is only ever one live code per contact (a database index).
+4. A new challenge stores a random salt, an HMAC of the code, its length, expiry (`identity.otp_expiry_seconds`, 10 minutes) and attempt limit (`identity.otp_max_attempts`, 5).
+
+**The code is never stored.** Not in the challenge, not in the outbox, not in `comms.message`. The code is derived as an HMAC of the challenge id and salt under `OTP_SECRET`; the sender re-derives it at the moment of sending, and the verifier compares an HMAC of what was typed with the stored HMAC. A database reader without the secret learns nothing. A phone code goes by WhatsApp, then SMS; an email code by email (§5).
+
+**Verify** (`POST /auth/otp/verify {challengeId, code, displayName?, consent?, device?}`):
+- Wrong codes count down; the last one locks the challenge. Expired, used, locked and replaced codes are refused in plain words.
+- **An existing account** with that contact is signed in, and the contact marked verified if it wasn't.
+- **A new contact** needs a name and the consent ticks. A right code without them returns `details_required` and **does not use the code up**, so the app asks for the details and sends the same code again. The account is created with that one contact verified: verification `none`, tier Guest, consent recorded for every channel (granted or not).
+- **The second contact** is added while signed in (`purpose: add_contact`). When both email and phone are verified the account becomes `partial` and a Guest becomes Verified, exactly as the schema's checks require. A contact that belongs to another account is refused.
+- **Link signals** for the shill-bidding bar: the verified phone, the device fingerprint and the IPv4 /24 (IPv6 /48) network go into `identity.link_signal` as keyed hashes (`linkSignalHmac`, `LINK_SIGNAL_SECRET`). The existing check in bidding (`isLinkedToSellerOfLot`) then refuses a bidder who signed in from a seller's phone (tested).
+- **Devices**: the fingerprint's keyed hash is registered in `identity.device` (first and last seen; a revoked device signing in again is restored).
+- **Session**: the same cookie and token as before (`mintSession`; `session.ts` is unchanged). Demo sign-in still works where enabled (A42).
+
+## 10. WhatsApp intake
+
+`packages/seller` already decides a selling conversation (`handleIntakeMessage`, a pure state machine). `WhatsAppIntake` carries it:
+
+1. Each inbound WhatsApp message is recorded once in `comms.inbound_message` (provider id as key; only ids and kind are kept), so Meta's webhook retries change nothing.
+2. A conversation starts when someone whose **verified phone** is that number sends **SELL** (A49). Anyone else gets a short help reply; an unknown number is asked to sign in to the app with that number first.
+3. The conversation state lives in `comms.conversation` between messages (one open conversation per number).
+4. When the seller confirms, a WhatsApp consignment with one draft lot is created through `SellerService` (category, title, condition, reserve from the chat; item state "used", starting bid 0 and branch HRE for staff to complete; photo media ids kept in the conversation state). A crash part-way is finished by the worker (`resumeSubmissions`), without duplicating the lot.
+5. Every reply goes out through the outbox and dispatcher as a `chat_reply`, and the seller then gets `consignment_received`.
+
+A test runs a whole consignment by chat with the fake channel and checks each reply.
+
+## 11. API, worker and configuration
+
+| Method and path | Auth | What |
+|---|---|---|
+| `POST /auth/otp/start` `{contact, purpose?}` | optional (required for `add_contact`) | Sends a code. 429 with `retryAfterSeconds` when rate-limited or too soon |
+| `POST /auth/otp/verify` `{challengeId, code, displayName?, consent?, device?}` | optional | Signs in or creates the account; sets the session cookie |
+| `GET /me/preferences`, `PUT /me/preferences` `{changes: [{category, channel, enabled}]}` | required | Preference centre |
+| `GET /me/notifications?limit&before`, `POST /me/notifications/:id/read` | required | In-app feed |
+| `GET /webhooks/whatsapp` | — | Meta's verify-token handshake |
+| `POST /webhooks/whatsapp` | signature | Delivery statuses and inbound chat messages |
+| `POST /webhooks/sms-status` | signature | SMS delivery reports |
+
+The API is created with `rawBody: true` so webhooks are checked against the exact bytes received. The worker's tick now also runs `alertOverdueTitleSteps`, `EndingSoonAlerts.queue`, `resumeSubmissions` and `Dispatcher.run`. The API runs the dispatcher straight after a code is requested and after a webhook, so codes and chat replies don't wait for the worker.
+
+Environment (see [`.env.example`](../.env.example)): `OTP_SECRET` and `LINK_SIGNAL_SECRET` (32+ characters, required in production), `PUBLIC_WEB_URL`, `WHATSAPP_*`, `SMS_*`, `EMAIL_FROM`, `EMAIL_TRANSPORT`. Outside production, any channel without credentials is a fake; in production it is simply absent.
+
+## 12. Rules added or changed
+
+| Rule | Value | Provenance |
+|---|---|---|
+| `comms.fallback` | Extended with lost, default, payout, registration, consignment, staff_task and otp (§5); keys are now optional | PROPOSED |
+| `comms.quiet_hours` | 21:00–07:00, Africa/Harare | ASSUMPTION (A45) |
+| `comms.retry` (internal) | 3 sends, backoff 30 s then 300 s, 5 outbox attempts, 60 s lease | PROPOSED |
+| `comms.preference_defaults` | §6; marketing must be empty, transactional categories need a channel | ASSUMPTION (A48) |
+| `identity.otp_code_length` (internal) | 6 | PROPOSED (A47) |
+| `identity.otp_expiry_seconds` | 600 | PROPOSED (A47) |
+| `identity.otp_max_attempts` | 5 | PROPOSED (A47) |
+| `identity.otp_resend_cooldown_seconds` | 60 | PROPOSED (A47) |
+| `identity.otp_max_sends` (internal) | 3 | PROPOSED (A47) |
+| `identity.otp_rate_limits` (internal) | 5 per contact, 20 per network, per hour | PROPOSED (A47) |
+
+## 13. Database invariants
+
+Added to [`db/tests/invariants.sql`](../db/tests/invariants.sql) (26 new; 95 in all):
+- approved templates never change or disappear
+- SMS templates are GSM-7; email templates have a subject
+- message status only moves forward, and sent needs a provider id
+- recipient, channel and template never change after queueing; messages are never deleted
+- a provider id names one message
+- a fallback is the same message to the same person on another channel
+- R4 also holds for address-only messages
+- preference categories are a fixed list, and money categories keep a channel
+- one live code per contact
+- a code's terms are immutable, attempts only go up, and it cannot be verified after expiry
+- a used code is final
+- inbound messages are append-only; one open conversation per number; a chat consignment is done only with its consignment and lot
+
+Migration 0002 applied to the previous schema gives the same `comms`, `identity` and `core` structure (columns, constraints, indexes, triggers, functions) and the same templates as a database built from the new `schema.sql` (compared once while building it).
+
+## 14. Evidence
+
+| Behaviour | Test |
+|---|---|
+| Rendering fills placeholders and refuses blanks; Meta's numbered body | `packages/comms/src/comms.test.ts` (pure) |
+| GSM-7 set, extension characters, look-alikes; a long title shortened, never the link | same |
+| Every topic has a template on every channel; every SMS fits 160 with realistic values; plain-language check | same |
+| `db/seed.sql` and migration 0002 hold exactly the generated library | same |
+| Fallback orders from the rulebook; quiet hours and their exceptions; Harare times; public rulebook text; refusal of marketing-on defaults | same |
+| WhatsApp request bodies (template, authentication, session text), temporary vs permanent errors, signature check, status and inbound parsing, handshake | same |
+| HTTP SMS fields, response id, signed delivery report | same |
+| Outbid by WhatsApp with an in-app copy; outbox marked dispatched; re-run sends nothing (R4) | `packages/comms/src/dispatcher.test.ts` (PostgreSQL) |
+| Permanent failure → next channel at once, linked by `fallback_of` | same |
+| Timeout → next channel; delivered and read reports stop it; late "sent" ignored | same |
+| Failed delivery report → next channel | same |
+| Temporary failures retried at 30 s and 5 min, then the next channel | same |
+| No consent, preference off, nobody reachable | same |
+| Quiet hours hold alerts to 07:00, except lots closing first and sign-in codes | same |
+| Expired messages suppressed; bad events retried 5 times then left; unknown topics left alone | same |
+| Feed: rendered, newest first, unread count, mark read, not someone else's | same |
+| Preferences: defaults, marketing off, transactional keeps a channel (service and database), audited with category and channel | same |
+| Two dispatchers at once never send a message twice | same |
+| Registration → bids → ending soon → close → invoice → 12 h and 36 h reminders → payment → overdue title steps → title complete → release → payout scheduled and paid, each heard once, emails for the record | `packages/comms/src/flows.test.ts` (real services) |
+| Unpaid invoice: warning, then deposit forfeited with the amount | same |
+| Sign-in code: WhatsApp fails → SMS; code verifies; email code by email; code not in message params | same |
+| Seller consigns by WhatsApp end to end; webhook retry ignored; unknown number asked to sign in | same |
+| Phone normalisation, landlines refused, masking; code derivation and HMAC check; networks | `packages/identity/src/identity.test.ts` |
+| Code stored only as salt and HMAC; new phone needs details without using the code; consent recorded; link signals; second contact → partial and Verified; device seen again | same (PostgreSQL) |
+| Wrong codes lock; expiry; resend cooldown reuses the code; rate limits per contact and network | same |
+| Link signals from sign-in trip the seller-link bar in bidding | same |
+| Database refuses changes to a finished challenge or its terms | same |
+| API: sign-up by phone with cookie, add email → partial; bad contacts, 429, 404; demo sign-in still works; preferences; feed; WhatsApp handshake, signatures, statuses and chat intake; SMS reports | `apps/api/src/comms.test.ts` |
+| Production refuses to start without secrets and registers no fakes | same |
+| Schema invariants above | `db/tests/invariants.sql` |
+
+## 15. Open items
+
+| Item | Owner | Effect until decided |
+|---|---|---|
+| A43: the WhatsApp adapter has not run against Meta; templates not yet submitted for approval | Tech lead / ABC Product | Fakes in development; not registered in production until tested on a real number |
+| A44: no SMS aggregator chosen; the HTTP adapter is a configurable guess | ABC IT / Finance | SMS fallback absent in production until configured and tested |
+| A45: quiet hours and their exceptions | ABC Product | 21:00–07:00 Harare, as in §7 |
+| A46: consent model (no row = no consent; codes and chat replies exempt) needs counsel's view under the Cyber and Data Protection Act (Q8) | Counsel | As in §6 |
+| A47: OTP parameters and phone normalisation | ABC Risk | As in §9 |
+| A48: default preferences; no push or email provider chosen; push tokens not stored yet | ABC Product / IT | Push and email absent in production unless configured |
+| A49: WhatsApp intake defaults (keyword, branch, item state, starting bid) | ABC Operations | Staff complete every chat lot before it can be listed |
+| Per-consumer outbox cursors when a second consumer (analytics, realtime) arrives | Build | The dispatcher claims only its own topics |
+| A watch list for "ending soon" to non-bidders | Build (catalogue) | Only bidders get ending-soon alerts |
+| New-device alerts and a device list screen (docs/01 §6.4) | Build | Devices are recorded, nobody is alerted yet |
+| Passwords and TOTP (docs/01 §6.4) | Build | One-time codes are the only sign-in |
+| Message retention: params minimised, then pseudonymised after 24 months (docs/02 §9) | Build | Messages are kept; the database forbids deletion |
+| Behind a load balancer, Express's `trust proxy` must be set so the per-network code limit sees the client's address, not the proxy's | ABC IT / build | Per-network limits count the proxy's address |
+| Web screens for sign-in, preferences and the feed | Lead (apps/web) | API only |
